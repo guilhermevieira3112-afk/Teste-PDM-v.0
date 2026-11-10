@@ -1,0 +1,8 @@
+{
+  "name": "Remix PDM Core Industrial \u0026 Almoxarifado Master Data",
+  "description": "Sistema de gestão de almoxarifado industrial com catálogo PDM, saneamento de dados, governança centralizada e análise de Curva ABC.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

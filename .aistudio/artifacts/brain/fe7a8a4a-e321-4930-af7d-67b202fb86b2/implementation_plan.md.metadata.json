@@ -1,0 +1,6 @@
+{
+  "summary": "Plano de implementação para a nova tela de autenticação da PremieRpet com Login, Senha, Cadastro de Usuários, Recuperação de Credenciais, integração da nova logo PNG oficial e suporte à etapa de verificação de 2 fatores (2FA) via Microsoft Authenticator.",
+  "updatedAt": "2026-11-03T01:07:27.371762317Z",
+  "requestFeedback": true,
+  "userFacing": true
+}
