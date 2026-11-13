@@ -1,30 +1,40 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { 
   Search, 
-  Filter, 
-  Layers, 
   Copy, 
   Check, 
   Plus, 
-  Download, 
-  Building2, 
-  Eye, 
-  Tag, 
-  Hash, 
   FileSpreadsheet,
-  CheckCircle2,
-  AlertCircle,
   ChevronLeft,
   ChevronRight,
   ChevronsLeft,
   ChevronsRight,
   Sliders,
-  Sparkles,
-  SlidersHorizontal,
-  PackageCheck
+  X
 } from 'lucide-react';
 import { PDMItem, UserRole, Tenant, TenantStockItem } from '../../types/pdm';
-import { matchTotvsSearch, SearchLogicMode } from '../../utils/totvsSearch';
+import { matchTotvsTokens } from '../../utils/totvsSearch';
+
+const DogPawOutlineIcon: React.FC<{ className?: string }> = ({ className = 'w-4 h-4' }) => (
+  <svg
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth={1.75}
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    className={className}
+    aria-hidden="true"
+  >
+    {/* Four outer toes */}
+    <ellipse cx="5.5" cy="9.5" rx="1.6" ry="2.2" transform="rotate(-18 5.5 9.5)" />
+    <ellipse cx="9.6" cy="6.2" rx="1.6" ry="2.3" transform="rotate(-6 9.6 6.2)" />
+    <ellipse cx="14.4" cy="6.2" rx="1.6" ry="2.3" transform="rotate(6 14.4 6.2)" />
+    <ellipse cx="18.5" cy="9.5" rx="1.6" ry="2.2" transform="rotate(18 18.5 9.5)" />
+    {/* Main metacarpal pad */}
+    <path d="M12 11.2c-2.6 0-5.1 2.2-5.1 4.8 0 1.8 1.3 2.9 2.9 2.9.9 0 1.5-.4 2.2-.4s1.3.4 2.2.4c1.6 0 2.9-1.1 2.9-2.9 0-2.6-2.5-4.8-5.1-4.8z" />
+  </svg>
+);
 
 interface CatalogViewProps {
   items: PDMItem[];
@@ -45,14 +55,16 @@ export const CatalogView: React.FC<CatalogViewProps> = ({
   onAddToStock,
   onSelectItemDetail,
 }) => {
-  const [searchTerm, setSearchTerm] = useState('');
-  const [searchLogicMode, setSearchLogicMode] = useState<SearchLogicMode>('AND');
+  const [validatedTerms, setValidatedTerms] = useState<string[]>([]);
+  const [searchDraft, setSearchDraft] = useState('');
   const [selectedPlantFilter, setSelectedPlantFilter] = useState<'ALL' | '10' | '14' | 'BOTH'>('ALL');
   const [selectedSituationFilter, setSelectedSituationFilter] = useState<'ALL' | 'Ativo' | 'Obsoleto'>('ALL');
   const [selectedStockFilter, setSelectedStockFilter] = useState<'ALL' | 'WITH_STOCK' | 'ZERO_STOCK'>('ALL');
+  const [selectedNivel1Filter, setSelectedNivel1Filter] = useState<string>('ALL');
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState<number>(50);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
 
   // Set of PDM item IDs already added to the active tenant's stock
   const stockedPdmIds = useMemo(() => {
@@ -63,20 +75,107 @@ export const CatalogView: React.FC<CatalogViewProps> = ({
     return items.filter((item) => item.status === 'APPROVED');
   }, [items]);
 
+  // Unique Nível 1 list for filtering
+  const availableNiveis1 = useMemo(() => {
+    const set = new Set<string>();
+    approvedItems.forEach((i) => {
+      if (i.nivel1) set.add(i.nivel1);
+    });
+    return Array.from(set).sort((a, b) => a.localeCompare(b, 'pt-BR'));
+  }, [approvedItems]);
+
+  // Combine validated chips + active draft words for strict AND filtering
+  const activeSearchTokens = useMemo(() => {
+    const draftTokens = searchDraft
+      .trim()
+      .split(/\s+/)
+      .map((t) => t.trim())
+      .filter(Boolean);
+    const seen = new Set<string>();
+    const combined: string[] = [];
+    for (const term of [...validatedTerms, ...draftTokens]) {
+      const lower = term.toLowerCase();
+      if (!seen.has(lower)) {
+        seen.add(lower);
+        combined.push(term);
+      }
+    }
+    return combined;
+  }, [validatedTerms, searchDraft]);
+
+  // Commit draft text into validated search term chip(s)
+  const commitDraftTerm = (rawText?: string) => {
+    const textToCommit = (rawText !== undefined ? rawText : searchDraft).trim();
+    if (!textToCommit) return;
+
+    const newTokens = textToCommit
+      .split(/[\s,;]+/)
+      .map((t) => t.trim())
+      .filter(Boolean);
+
+    if (newTokens.length === 0) return;
+
+    setValidatedTerms((prev) => {
+      const existingLower = new Set(prev.map((t) => t.toLowerCase()));
+      const additions = newTokens.filter((t) => !existingLower.has(t.toLowerCase()));
+      return [...prev, ...additions];
+    });
+    setSearchDraft('');
+    searchInputRef.current?.focus();
+  };
+
+  const removeValidatedTerm = (indexToRemove: number) => {
+    setValidatedTerms((prev) => prev.filter((_, idx) => idx !== indexToRemove));
+    searchInputRef.current?.focus();
+  };
+
+  const handleClearSearch = () => {
+    setValidatedTerms([]);
+    setSearchDraft('');
+    searchInputRef.current?.focus();
+  };
+
+  const handleSearchKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter' || e.key === ',' || e.key === ';') {
+      if (searchDraft.trim()) {
+        e.preventDefault();
+        commitDraftTerm();
+      }
+    } else if (e.key === ' ') {
+      if (searchDraft.trim()) {
+        e.preventDefault();
+        commitDraftTerm();
+      }
+    } else if (e.key === 'Backspace' && !searchDraft && validatedTerms.length > 0) {
+      setValidatedTerms((prev) => prev.slice(0, -1));
+    }
+  };
+
   // Reset page when filters change
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchTerm, searchLogicMode, selectedPlantFilter, selectedSituationFilter, selectedStockFilter, pageSize]);
+  }, [activeSearchTokens, selectedPlantFilter, selectedSituationFilter, selectedStockFilter, selectedNivel1Filter, pageSize]);
 
   const filteredItems = useMemo(() => {
     return approvedItems.filter((item) => {
+      // Nível 1 Filter (MRO)
+      if (selectedNivel1Filter !== 'ALL' && item.nivel1 !== selectedNivel1Filter) {
+        return false;
+      }
+
+      const e10 = item.establishments?.['10'];
+      const e14 = item.establishments?.['14'];
+      const plantStr = (item.totvsPlant || '').toLowerCase();
+      const belongsTo10 = Boolean(e10) || plantStr.includes('dourado');
+      const belongsTo14 = Boolean(e14) || plantStr.includes('paran') || plantStr.includes('porto');
+
       // Plant / Estabelecimento filter (10 Dourado / 14 Porto Amazonas)
       if (selectedPlantFilter === '10') {
-        if (!item.establishments?.['10']) return false;
+        if (!belongsTo10) return false;
       } else if (selectedPlantFilter === '14') {
-        if (!item.establishments?.['14']) return false;
+        if (!belongsTo14) return false;
       } else if (selectedPlantFilter === 'BOTH') {
-        if (!item.establishments?.['10'] || !item.establishments?.['14']) return false;
+        if (!belongsTo10 || !belongsTo14) return false;
       }
 
       // Situation filter (Ativo vs Obsoleto from Itens.csv)
@@ -86,23 +185,35 @@ export const CatalogView: React.FC<CatalogViewProps> = ({
         if (selectedSituationFilter === 'Obsoleto' && !isObsolete) return false;
       }
 
-      // Stock filter
+      // Stock filter scoped accurately to the selected establishment
       if (selectedStockFilter !== 'ALL') {
-        const s10 = item.establishments?.['10']?.saldoEstoque || 0;
-        const s14 = item.establishments?.['14']?.saldoEstoque || 0;
-        const total = s10 + s14;
-        if (selectedStockFilter === 'WITH_STOCK' && total <= 0) return false;
-        if (selectedStockFilter === 'ZERO_STOCK' && total > 0) return false;
+        const s10 = e10?.saldoEstoque || 0;
+        const s14 = e14?.saldoEstoque || 0;
+        let relevantStock = s10 + s14;
+        if (selectedPlantFilter === '10') {
+          relevantStock = s10;
+        } else if (selectedPlantFilter === '14') {
+          relevantStock = s14;
+        }
+
+        if (selectedStockFilter === 'WITH_STOCK' && relevantStock <= 0) return false;
+        if (selectedStockFilter === 'ZERO_STOCK' && relevantStock > 0) return false;
       }
 
-      // Smart E/OU search query matching across:
-      // Item (Col C), Descrição Item (60c - Col AE), Narrativa (200c - Col AF) e Família (Col B)
-      if (!searchTerm.trim()) return true;
+      // Strict AND search across Descrição do Item (60c) + Narrativa do Item (200c) + Código/Família/NCM
+      if (activeSearchTokens.length === 0) return true;
 
-      const result = matchTotvsSearch(item, searchTerm, searchLogicMode);
+      const result = matchTotvsTokens(item, activeSearchTokens);
       return result.isMatch;
     });
-  }, [approvedItems, selectedPlantFilter, selectedSituationFilter, selectedStockFilter, searchTerm, searchLogicMode]);
+  }, [
+    approvedItems,
+    selectedNivel1Filter,
+    selectedPlantFilter,
+    selectedSituationFilter,
+    selectedStockFilter,
+    activeSearchTokens,
+  ]);
 
   // Pagination calculation
   const totalPages = Math.max(1, Math.ceil(filteredItems.length / pageSize));
@@ -174,6 +285,10 @@ export const CatalogView: React.FC<CatalogViewProps> = ({
     document.body.removeChild(link);
   };
 
+  const showCol10 = selectedPlantFilter !== '14';
+  const showCol14 = selectedPlantFilter !== '10';
+  const tableColSpan = 6 + (showCol10 ? 1 : 0) + (showCol14 ? 1 : 0);
+
   return (
     <div className="space-y-6">
       
@@ -187,90 +302,144 @@ export const CatalogView: React.FC<CatalogViewProps> = ({
             <span className="text-xs font-mono font-bold px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200">
               {approvedItems.length} Itens Homologados
             </span>
-            <span className="text-xs font-mono font-bold px-2.5 py-0.5 rounded-full bg-blue-50 text-blue-800 border border-blue-200">
-              Base TOTVS CE0348 (Estab. 10 Dourado / 14 Porto Amazonas)
-            </span>
           </div>
           <p className="text-xs text-slate-500 mt-1">
-            Pesquisa integrada com operadores lógicos <strong>E/OU</strong> cruzando <strong>Item TOTVS</strong>, <strong>Descrição Curta (60c)</strong> e <strong>Narrativa Técnica (200c)</strong> com saldos preservados de almoxarifado.
+            Campo de consulta de itens, inclusão de itens e novos cadastros
           </p>
         </div>
 
-        <div className="flex items-center gap-2.5 shrink-0">
+        <div className="flex flex-wrap items-center gap-3 shrink-0">
           <button
             onClick={handleExportCSV}
-            className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold transition-colors border border-slate-200"
-            title="Exportar planilha consolidada TOTVS com saldos de Dourado e Porto Amazonas"
+            className="flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold transition-colors border border-slate-200"
+            title="Exportar planilha consolidada com os itens da consulta atual"
           >
             <FileSpreadsheet className="w-4 h-4 text-emerald-700" />
-            <span>Exportar CSV (TOTVS)</span>
+            <span>Exportar consulta atual</span>
           </button>
 
+          <div className="hidden sm:block h-8 w-px bg-slate-200" />
+
+          {/* SEPARATED HIGHLIGHTED ACTION BUTTON: NOVO CADASTRO PDM WITH DOG PAW OUTLINE */}
           <button
             onClick={onOpenPdmBuilder}
-            className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold transition-all shadow-sm"
+            className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-extrabold transition-all shadow-md hover:shadow-lg border border-amber-400 ring-2 ring-amber-500/20 active:scale-[0.98]"
           >
-            <Plus className="w-4 h-4 stroke-[2.5]" />
+            <Plus className="w-4 h-4 stroke-[2.75]" />
             <span>Novo Cadastro PDM</span>
+            <DogPawOutlineIcon className="w-4 h-4 text-slate-900/75 ml-0.5" />
           </button>
         </div>
       </div>
 
-      {/* SEARCH STRIP WITH E/OU SELECTOR & FILTERS */}
+      {/* SEARCH STRIP (MULTI-TERM VALIDATED CHIPS + FILTERS) */}
       <div className="space-y-2.5">
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-3">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-3 items-start">
           
-          {/* Main Search Input with E/OU Logic Mode Toggle (7 cols) */}
-          <div className="lg:col-span-7 flex items-stretch gap-2">
-            <div className="relative flex-1">
-              <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
-              <input
-                type="text"
-                placeholder="Buscar por código (ex: 5040-0001), descrição curta (60c) ou narrativa (200c - Festo, SKF, part number)..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="w-full pl-10 pr-4 py-2.5 bg-white border border-slate-200 rounded-xl text-xs text-slate-900 placeholder-slate-400 focus:outline-none focus:border-emerald-600 focus:ring-2 focus:ring-emerald-100 font-medium shadow-2xs"
-              />
-            </div>
+          {/* Main Validated Token Search Input (6 cols) */}
+          <div className="lg:col-span-6">
+            <div
+              onClick={() => searchInputRef.current?.focus()}
+              className="min-h-[42px] w-full px-3 py-1.5 bg-white border border-slate-200 rounded-xl text-xs text-slate-900 focus-within:border-emerald-600 focus-within:ring-2 focus-within:ring-emerald-100 shadow-2xs flex flex-wrap items-center gap-1.5 cursor-text transition-all"
+            >
+              <Search className="w-4 h-4 text-slate-400 shrink-0 mr-0.5" />
 
-            {/* Toggle E / OU */}
-            <div className="flex items-center rounded-xl bg-white border border-slate-200 p-1 shadow-2xs shrink-0">
-              <button
-                onClick={() => setSearchLogicMode('AND')}
-                className={`px-3 py-1 rounded-lg text-xs font-mono font-bold transition-all ${
-                  searchLogicMode === 'AND'
-                    ? 'bg-emerald-700 text-white shadow-xs'
-                    : 'text-slate-500 hover:text-slate-800'
-                }`}
-                title="Lógica E (AND): Todos os termos devem estar presentes na descrição curta, narrativa ou código"
-              >
-                Lógica E
-              </button>
-              <button
-                onClick={() => setSearchLogicMode('OR')}
-                className={`px-3 py-1 rounded-lg text-xs font-mono font-bold transition-all ${
-                  searchLogicMode === 'OR'
-                    ? 'bg-emerald-700 text-white shadow-xs'
-                    : 'text-slate-500 hover:text-slate-800'
-                }`}
-                title="Lógica OU (OR): Qualquer um dos termos digitados é localizado (ampliando resultados)"
-              >
-                Lógica OU
-              </button>
+              {/* Validated Search Term Chips */}
+              {validatedTerms.map((term, index) => (
+                <span
+                  key={`${term}-${index}`}
+                  className="inline-flex items-center gap-1 pl-2 pr-1 py-0.5 rounded-lg bg-emerald-50 border border-emerald-300 text-emerald-900 font-mono text-[11px] font-bold shadow-2xs"
+                >
+                  <Check className="w-3 h-3 text-emerald-600 stroke-[2.75] shrink-0" />
+                  <span>{term}</span>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      removeValidatedTerm(index);
+                    }}
+                    className="p-0.5 rounded hover:bg-emerald-200/70 text-emerald-700 hover:text-emerald-950 transition-colors"
+                    title={`Remover termo "${term}"`}
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                </span>
+              ))}
+
+              <input
+                ref={searchInputRef}
+                type="text"
+                placeholder={
+                  validatedTerms.length === 0
+                    ? 'Digite um termo e valide com ✓ ou Enter (ex: ROLAMENTO)...'
+                    : 'Adicionar próximo termo e validar com ✓...'
+                }
+                value={searchDraft}
+                onChange={(e) => setSearchDraft(e.target.value)}
+                onKeyDown={handleSearchKeyDown}
+                className="flex-1 min-w-[160px] py-1 bg-transparent text-xs text-slate-900 placeholder-slate-400 focus:outline-none font-medium"
+              />
+
+              {/* Validate Term Check Button */}
+              {searchDraft.trim().length > 0 && (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    commitDraftTerm();
+                  }}
+                  className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white text-[11px] font-bold transition-colors shrink-0 shadow-2xs"
+                  title="Validar e fixar termo na pesquisa"
+                >
+                  <Check className="w-3.5 h-3.5 stroke-[2.75]" />
+                  <span>Validar</span>
+                </button>
+              )}
+
+              {/* Clear All Search Terms */}
+              {(validatedTerms.length > 0 || searchDraft.length > 0) && (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleClearSearch();
+                  }}
+                  className="p-1 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors shrink-0"
+                  title="Limpar pesquisa"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              )}
             </div>
           </div>
 
-          {/* Estabelecimentos Filter (3 cols) */}
-          <div className="lg:col-span-3">
+          {/* Nível 1 Filter (2 cols) */}
+          <div className="lg:col-span-2">
+            <select
+              value={selectedNivel1Filter}
+              onChange={(e) => setSelectedNivel1Filter(e.target.value)}
+              className="w-full min-h-[42px] py-2 px-3 bg-white border border-slate-200 rounded-xl text-xs text-slate-800 focus:outline-none focus:border-emerald-600 focus:ring-2 focus:ring-emerald-100 font-semibold shadow-2xs"
+            >
+              <option value="ALL">Nível 1: Todos ({availableNiveis1.length})</option>
+              {availableNiveis1.map((n1) => (
+                <option key={n1} value={n1}>
+                  {n1}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Estabelecimentos Filter (2 cols) */}
+          <div className="lg:col-span-2">
             <select
               value={selectedPlantFilter}
-              onChange={(e) => setSelectedPlantFilter(e.target.value as any)}
-              className="w-full py-2.5 px-3 bg-white border border-slate-200 rounded-xl text-xs text-slate-800 focus:outline-none focus:border-emerald-600 focus:ring-2 focus:ring-emerald-100 font-semibold shadow-2xs"
+              onChange={(e) => setSelectedPlantFilter(e.target.value as 'ALL' | '10' | '14' | 'BOTH')}
+              className="w-full min-h-[42px] py-2 px-3 bg-white border border-slate-200 rounded-xl text-xs text-slate-800 focus:outline-none focus:border-emerald-600 focus:ring-2 focus:ring-emerald-100 font-semibold shadow-2xs"
             >
-              <option value="ALL">Estabelecimentos: Ambos (10 & 14)</option>
-              <option value="10">Apenas Estab. 10 · Dourado / SP</option>
-              <option value="14">Apenas Estab. 14 · Porto Amazonas / PR</option>
-              <option value="BOTH">Cadastrado em Ambas as Plantas</option>
+              <option value="ALL">Estabelecimentos: Ambos</option>
+              <option value="10">Estab. 10 · Dourado</option>
+              <option value="14">Estab. 14 · Porto Amazonas</option>
+              <option value="BOTH">Em Ambas as Plantas</option>
             </select>
           </div>
 
@@ -278,11 +447,11 @@ export const CatalogView: React.FC<CatalogViewProps> = ({
           <div className="lg:col-span-2">
             <select
               value={selectedSituationFilter}
-              onChange={(e) => setSelectedSituationFilter(e.target.value as any)}
-              className="w-full py-2.5 px-3 bg-white border border-slate-200 rounded-xl text-xs text-slate-800 focus:outline-none focus:border-emerald-600 focus:ring-2 focus:ring-emerald-100 font-semibold shadow-2xs"
+              onChange={(e) => setSelectedSituationFilter(e.target.value as 'ALL' | 'Ativo' | 'Obsoleto')}
+              className="w-full min-h-[42px] py-2 px-3 bg-white border border-slate-200 rounded-xl text-xs text-slate-800 focus:outline-none focus:border-emerald-600 focus:ring-2 focus:ring-emerald-100 font-semibold shadow-2xs"
             >
               <option value="ALL">Situação: Todas</option>
-              <option value="Ativo">Apenas Ativos (Itens.csv)</option>
+              <option value="Ativo">Apenas Ativos</option>
               <option value="Obsoleto">Totalmente Obsoletos</option>
             </select>
           </div>
@@ -325,8 +494,8 @@ export const CatalogView: React.FC<CatalogViewProps> = ({
             </button>
           </div>
 
-          <div className="font-mono text-[10px] text-slate-400">
-            Dica: Digite termos combinados como <code className="bg-slate-100 px-1 py-0.5 rounded text-emerald-800">ROLAMENTO SKF</code> ou <code className="bg-slate-100 px-1 py-0.5 rounded text-emerald-800">VALVULA OU ESFERA</code>
+          <div className="font-mono text-[10px] text-slate-500">
+            Dica: Digite uma palavra, valide com <strong className="text-emerald-700">✓</strong> (ou Enter/Espaço) e adicione outros termos (ex: <code className="bg-slate-100 px-1 py-0.5 rounded text-emerald-800">✓ ROLAMENTO</code> + <code className="bg-slate-100 px-1 py-0.5 rounded text-emerald-800">✓ SKF</code>) para cruzar Descrição e Narrativa.
           </div>
         </div>
       </div>
@@ -342,16 +511,16 @@ export const CatalogView: React.FC<CatalogViewProps> = ({
                 <th className="py-3 px-4">Narrativa Técnica (200c - Col AF)</th>
                 <th className="py-3 px-4 text-center">Situação</th>
                 <th className="py-3 px-4 text-center">Un</th>
-                <th className="py-3 px-4 text-right">Saldo Dourado (10)</th>
-                <th className="py-3 px-4 text-right">Saldo Paraná (14)</th>
+                {showCol10 && <th className="py-3 px-4 text-right">Saldo Dourado (10)</th>}
+                {showCol14 && <th className="py-3 px-4 text-right">Saldo Paraná (14)</th>}
                 <th className="py-3 px-4 text-center">Ações</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 font-sans">
               {filteredItems.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="py-12 text-center text-slate-400 text-xs">
-                    Nenhum item localizado na base TOTVS CE0348 com os filtros selecionados.
+                  <td colSpan={tableColSpan} className="py-12 text-center text-slate-400 text-xs">
+                    Nenhum item localizado na base com os filtros selecionados.
                   </td>
                 </tr>
               ) : (
@@ -396,6 +565,18 @@ export const CatalogView: React.FC<CatalogViewProps> = ({
                             )}
                           </button>
                         </div>
+                        {item.nivel1 && (
+                          <div className="mt-1 flex items-center gap-1 flex-wrap">
+                            <span className="text-[10px] font-mono font-semibold text-emerald-800 bg-emerald-50 px-1.5 py-0.2 rounded border border-emerald-200">
+                              {item.nivel1}
+                            </span>
+                            {item.nivel2 && (
+                              <span className="text-[10px] font-mono text-slate-500 bg-slate-100 px-1.5 py-0.2 rounded">
+                                › {item.nivel2}
+                              </span>
+                            )}
+                          </div>
+                        )}
                       </td>
 
                       {/* AF - NARRATIVA DO ITEM (200 CARACTERES) */}
@@ -426,26 +607,30 @@ export const CatalogView: React.FC<CatalogViewProps> = ({
                       </td>
 
                       {/* SALDO DOURADO (ESTAB 10) */}
-                      <td className="py-3 px-4 whitespace-nowrap text-right font-mono">
-                        {e10 ? (
-                          <span className={`font-semibold ${e10.saldoEstoque > 0 ? 'text-emerald-700' : 'text-slate-500'}`}>
-                            {e10.saldoEstoque} {item.unitOfMeasure || 'UN'}
-                          </span>
-                        ) : (
-                          <span className="text-slate-400 font-normal">-</span>
-                        )}
-                      </td>
+                      {showCol10 && (
+                        <td className="py-3 px-4 whitespace-nowrap text-right font-mono">
+                          {e10 ? (
+                            <span className={`font-semibold ${e10.saldoEstoque > 0 ? 'text-emerald-700' : 'text-slate-500'}`}>
+                              {e10.saldoEstoque} {item.unitOfMeasure || 'UN'}
+                            </span>
+                          ) : (
+                            <span className="text-slate-400 font-normal">-</span>
+                          )}
+                        </td>
+                      )}
 
                       {/* SALDO PARANÁ (ESTAB 14) */}
-                      <td className="py-3 px-4 whitespace-nowrap text-right font-mono">
-                        {e14 ? (
-                          <span className={`font-semibold ${e14.saldoEstoque > 0 ? 'text-emerald-700' : 'text-slate-500'}`}>
-                            {e14.saldoEstoque} {item.unitOfMeasure || 'UN'}
-                          </span>
-                        ) : (
-                          <span className="text-slate-400 font-normal">-</span>
-                        )}
-                      </td>
+                      {showCol14 && (
+                        <td className="py-3 px-4 whitespace-nowrap text-right font-mono">
+                          {e14 ? (
+                            <span className={`font-semibold ${e14.saldoEstoque > 0 ? 'text-emerald-700' : 'text-slate-500'}`}>
+                              {e14.saldoEstoque} {item.unitOfMeasure || 'UN'}
+                            </span>
+                          ) : (
+                            <span className="text-slate-400 font-normal">-</span>
+                          )}
+                        </td>
+                      )}
 
                       {/* AÇÕES (COLUNA DE AÇÕES ESPECÍFICAS) */}
                       <td className="py-3 px-4 whitespace-nowrap text-center">

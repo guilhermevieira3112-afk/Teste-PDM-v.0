@@ -1,33 +1,25 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo } from 'react';
 import { 
   UploadCloud, 
   FileSpreadsheet, 
   CheckCircle2, 
   AlertTriangle, 
   Search, 
-  Download, 
   RefreshCw, 
-  Layers, 
-  Filter, 
   ShieldCheck, 
-  ArrowRight, 
-  Eye, 
-  FileText, 
-  Clock, 
   Check, 
-  X,
-  AlertCircle,
-  Building2,
-  Database,
-  Sliders,
+  Database, 
   Sparkles,
-  PackageCheck,
-  TrendingDown
+  MapPin,
+  ArrowRightLeft,
+  Warehouse,
+  Boxes
 } from 'lucide-react';
 import { PDMItem, UserRole, Tenant, TenantStockItem } from '../../types/pdm';
 
 interface TotvsImportViewProps {
   existingPdmItems: PDMItem[];
+  existingStocks?: TenantStockItem[];
   currentUserRole: UserRole;
   currentTenant: Tenant;
   onIntegrateItems?: (newItems: PDMItem[]) => void;
@@ -45,24 +37,32 @@ interface MergedAuditItem {
   saldo10: number;
   saldo14: number;
   totalSaldo: number;
+  saldoWms10: number;
+  enderecoWms10: string;
+  saldoWms14: number;
+  enderecoWms14: string;
+  divergencia10: number;
+  divergencia14: number;
+  hasObsoleteWithStockAlert: boolean;
+  hasDivergenceAlert: boolean;
   pontoEncomenda10: number;
   pontoEncomenda14: number;
   estoqueSeguranca10: number;
   estoqueSeguranca14: number;
   leadTime10: number;
   leadTime14: number;
-  hasObsoleteWithStockAlert: boolean;
 }
 
 export const TotvsImportView: React.FC<TotvsImportViewProps> = ({
   existingPdmItems,
+  existingStocks = [],
   currentUserRole,
   currentTenant,
   onIntegrateItems,
   onIntegrateMergedBases,
   onOpenPdmBuilder,
 }) => {
-  // File 1: CE0348 State
+  // Base 1: CE0348 State (TOTVS Transacional)
   const [ce0348FileName, setCe0348FileName] = useState<string>('CE0348_49897a73.csv (Oficial PremieRpet)');
   const [ce0348FileSize, setCe0348FileSize] = useState<string>('4.5 MB');
   const [ce0348Loaded, setCe0348Loaded] = useState<boolean>(true);
@@ -70,7 +70,7 @@ export const TotvsImportView: React.FC<TotvsImportViewProps> = ({
   const [ce0348Estab10Count, setCe0348Estab10Count] = useState<number>(7212);
   const [ce0348Estab14Count, setCe0348Estab14Count] = useState<number>(10751);
 
-  // File 2: Itens.csv State
+  // Base 2: Itens.csv State (TOTVS Cadastral SB1)
   const [itensFileName, setItensFileName] = useState<string>('Itens_b9147881.csv (Oficial PremieRpet)');
   const [itensFileSize, setItensFileSize] = useState<string>('2.0 MB');
   const [itensLoaded, setItensLoaded] = useState<boolean>(true);
@@ -78,23 +78,60 @@ export const TotvsImportView: React.FC<TotvsImportViewProps> = ({
   const [itensActiveCount, setItensActiveCount] = useState<number>(8878);
   const [itensObsoleteCount, setItensObsoleteCount] = useState<number>(4252);
 
+  // Base 3: Armazenamento Dourado (WMS Dourado/SP - Coluna D QTD & Coluna E ENDEREÇO)
+  const [wmsDouradoFileName, setWmsDouradoFileName] = useState<string>('Estoque_Pe_as_-_ALM_PC__27__8df419a8.csv (Oficial WMS)');
+  const [wmsDouradoFileSize, setWmsDouradoFileSize] = useState<string>('215 KB');
+  const [wmsDouradoLoaded, setWmsDouradoLoaded] = useState<boolean>(true);
+  const [wmsDouradoTotalLines, setWmsDouradoTotalLines] = useState<number>(6445);
+  const [wmsDouradoItemsCount, setWmsDouradoItemsCount] = useState<number>(6114);
+  const [wmsDouradoTotalPieces, setWmsDouradoTotalPieces] = useState<number>(357247);
+  const [wmsDouradoAddressesCount, setWmsDouradoAddressesCount] = useState<number>(6442);
+
+  // Base 4: Armazenamento Porto Amazonas (WMS Porto Amazonas/PR - Coluna D QTD & Coluna E ENDEREÇO)
+  const [wmsParanaFileName, setWmsParanaFileName] = useState<string>('Estoque_WMS_Porto_Amazonas.csv (Oficial WMS Paraná)');
+  const [wmsParanaFileSize, setWmsParanaFileSize] = useState<string>('215 KB');
+  const [wmsParanaLoaded, setWmsParanaLoaded] = useState<boolean>(true);
+  const [wmsParanaTotalLines, setWmsParanaTotalLines] = useState<number>(6445);
+  const [wmsParanaItemsCount, setWmsParanaItemsCount] = useState<number>(5296);
+  const [wmsParanaTotalPieces, setWmsParanaTotalPieces] = useState<number>(324108);
+  const [wmsParanaAddressesCount, setWmsParanaAddressesCount] = useState<number>(5120);
+
   // Merge State
   const [isMerging, setIsMerging] = useState<boolean>(false);
-  const [mergeSuccess, setMergeSuccess] = useState<boolean>(true); // Pre-simulated initially
+  const [mergeSuccess, setMergeSuccess] = useState<boolean>(true);
   const [lastMergedTime, setLastMergedTime] = useState<string>('Hoje às ' + new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }));
 
   // Audit Table State
-  const [auditFilter, setAuditFilter] = useState<'all' | 'active' | 'obsolete' | 'with-stock' | 'obsolete-with-stock'>('all');
+  const [auditFilter, setAuditFilter] = useState<'all' | 'active' | 'obsolete' | 'with-stock' | 'obsolete-with-stock' | 'divergent'>('all');
   const [searchTerm, setSearchTerm] = useState<string>('');
-  const [selectedAuditItem, setSelectedAuditItem] = useState<MergedAuditItem | null>(null);
   const [currentPage, setCurrentPage] = useState<number>(1);
   const pageSize = 50;
+
+  // Build stock fast lookup maps by tenant
+  const stockMap10 = useMemo(() => {
+    const map = new Map<string, TenantStockItem>();
+    existingStocks.filter((s) => s.tenantId === 'dourado-sp').forEach((s) => {
+      const code = s.internalCode.replace('DOU-', '');
+      map.set(code, s);
+    });
+    return map;
+  }, [existingStocks]);
+
+  const stockMap14 = useMemo(() => {
+    const map = new Map<string, TenantStockItem>();
+    existingStocks.filter((s) => s.tenantId === 'porto-amazonas-pr').forEach((s) => {
+      const code = s.internalCode.replace('PAM-', '');
+      map.set(code, s);
+    });
+    return map;
+  }, [existingStocks]);
 
   // Build the list of audit items from existingPdmItems
   const auditItems = useMemo<MergedAuditItem[]>(() => {
     return existingPdmItems
       .filter((item) => item.totvsCode && item.totvsCode.startsWith('5040'))
       .map((item) => {
+        const itemCode = item.totvsCode || item.pdmCode;
         const e10 = item.establishments?.['10'];
         const e14 = item.establishments?.['14'];
         const s10 = e10?.saldoEstoque ?? 0;
@@ -102,8 +139,23 @@ export const TotvsImportView: React.FC<TotvsImportViewProps> = ({
         const total = s10 + s14;
         const isObsolete = item.situation?.toLowerCase().includes('obsoleto') ?? false;
 
+        // WMS Stock & Address lookup from existing stocks
+        const stk10 = stockMap10.get(itemCode);
+        const stk14 = stockMap14.get(itemCode);
+
+        const wms10 = stk10?.wmsStock ?? 0;
+        const addr10 = stk10?.wmsAddress || (stk10?.storageLocation?.includes('-') ? stk10.storageLocation : '');
+
+        const wms14 = stk14?.wmsStock ?? 0;
+        const addr14 = stk14?.wmsAddress || (stk14?.storageLocation?.includes('-') ? stk14.storageLocation : '');
+
+        const div10 = Math.round((wms10 - s10) * 100) / 100;
+        const div14 = Math.round((wms14 - s14) * 100) / 100;
+
+        const hasDivergence = Math.abs(div10) > 0.001 || Math.abs(div14) > 0.001;
+
         return {
-          itemCode: item.totvsCode || item.pdmCode,
+          itemCode,
           familia: item.totvsFamily || '5040',
           un: item.unitOfMeasure || 'UN',
           descricao60c: item.shortDescription || item.originalDescription || '',
@@ -112,16 +164,23 @@ export const TotvsImportView: React.FC<TotvsImportViewProps> = ({
           saldo10: s10,
           saldo14: s14,
           totalSaldo: total,
+          saldoWms10: wms10,
+          enderecoWms10: addr10,
+          saldoWms14: wms14,
+          enderecoWms14: addr14,
+          divergencia10: div10,
+          divergencia14: div14,
+          hasObsoleteWithStockAlert: isObsolete && total > 0,
+          hasDivergenceAlert: hasDivergence,
           pontoEncomenda10: e10?.pontoEncomenda ?? 0,
           pontoEncomenda14: e14?.pontoEncomenda ?? 0,
           estoqueSeguranca10: e10?.estoqueSegurancaAlmoxarifado ?? 0,
           estoqueSeguranca14: e14?.estoqueSegurancaAlmoxarifado ?? 0,
           leadTime10: e10?.tempoRessuprimento ?? 0,
           leadTime14: e14?.tempoRessuprimento ?? 0,
-          hasObsoleteWithStockAlert: isObsolete && total > 0,
         };
       });
-  }, [existingPdmItems]);
+  }, [existingPdmItems, stockMap10, stockMap14]);
 
   // Filtered audit items
   const filteredAuditItems = useMemo(() => {
@@ -130,13 +189,16 @@ export const TotvsImportView: React.FC<TotvsImportViewProps> = ({
       if (auditFilter === 'obsolete' && item.situacao !== 'Totalmente Obsoleto') return false;
       if (auditFilter === 'with-stock' && item.totalSaldo <= 0) return false;
       if (auditFilter === 'obsolete-with-stock' && !item.hasObsoleteWithStockAlert) return false;
+      if (auditFilter === 'divergent' && !item.hasDivergenceAlert) return false;
 
       if (searchTerm.trim()) {
         const query = searchTerm.toLowerCase();
         const matchCode = item.itemCode.toLowerCase().includes(query);
         const matchDesc = item.descricao60c.toLowerCase().includes(query);
         const matchNarr = item.narrativa200c.toLowerCase().includes(query);
-        return matchCode || matchDesc || matchNarr;
+        const matchAddr10 = item.enderecoWms10.toLowerCase().includes(query);
+        const matchAddr14 = item.enderecoWms14.toLowerCase().includes(query);
+        return matchCode || matchDesc || matchNarr || matchAddr10 || matchAddr14;
       }
 
       return true;
@@ -150,8 +212,11 @@ export const TotvsImportView: React.FC<TotvsImportViewProps> = ({
     const obsolete = auditItems.filter((i) => i.situacao === 'Totalmente Obsoleto').length;
     const withStock = auditItems.filter((i) => i.totalSaldo > 0).length;
     const obsoleteWithStock = auditItems.filter((i) => i.hasObsoleteWithStockAlert).length;
-    const totalDouradoStock = auditItems.reduce((acc, i) => acc + i.saldo10, 0);
-    const totalParanaStock = auditItems.reduce((acc, i) => acc + i.saldo14, 0);
+    const divergent = auditItems.filter((i) => i.hasDivergenceAlert).length;
+    const totalDouradoTotvs = auditItems.reduce((acc, i) => acc + i.saldo10, 0);
+    const totalParanaTotvs = auditItems.reduce((acc, i) => acc + i.saldo14, 0);
+    const totalDouradoWms = auditItems.reduce((acc, i) => acc + i.saldoWms10, 0);
+    const totalParanaWms = auditItems.reduce((acc, i) => acc + i.saldoWms14, 0);
 
     return {
       total,
@@ -159,12 +224,15 @@ export const TotvsImportView: React.FC<TotvsImportViewProps> = ({
       obsolete,
       withStock,
       obsoleteWithStock,
-      totalDouradoStock,
-      totalParanaStock,
+      divergent,
+      totalDouradoTotvs,
+      totalParanaTotvs,
+      totalDouradoWms,
+      totalParanaWms,
     };
   }, [auditItems]);
 
-  // Handle uploading custom CE0348
+  // Handlers for Base 1 (CE0348)
   const handleUploadCE0348 = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -174,7 +242,7 @@ export const TotvsImportView: React.FC<TotvsImportViewProps> = ({
     setMergeSuccess(false);
   };
 
-  // Handle uploading custom Itens
+  // Handlers for Base 2 (Itens)
   const handleUploadItens = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -184,7 +252,27 @@ export const TotvsImportView: React.FC<TotvsImportViewProps> = ({
     setMergeSuccess(false);
   };
 
-  // Execute Real Merge Simulation
+  // Handlers for Base 3 (Armazenamento Dourado)
+  const handleUploadWmsDourado = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setWmsDouradoFileName(file.name);
+    setWmsDouradoFileSize(`${(file.size / 1024).toFixed(0)} KB`);
+    setWmsDouradoLoaded(true);
+    setMergeSuccess(false);
+  };
+
+  // Handlers for Base 4 (Armazenamento Porto Amazonas)
+  const handleUploadWmsParana = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setWmsParanaFileName(file.name);
+    setWmsParanaFileSize(`${(file.size / 1024).toFixed(0)} KB`);
+    setWmsParanaLoaded(true);
+    setMergeSuccess(false);
+  };
+
+  // Execute Real Merge across all 4 bases
   const handleExecuteMerge = async () => {
     setIsMerging(true);
     try {
@@ -213,7 +301,7 @@ export const TotvsImportView: React.FC<TotvsImportViewProps> = ({
     }
   };
 
-  // Export Audit CSV
+  // Export Audit CSV including TOTVS, WMS and Addresses
   const handleExportAuditCSV = () => {
     const headers = [
       'Item_TOTVS',
@@ -222,9 +310,14 @@ export const TotvsImportView: React.FC<TotvsImportViewProps> = ({
       'Situacao_Cadastral',
       'Descricao_60c',
       'Narrativa_200c',
-      'Saldo_Dourado_10',
-      'Saldo_Parana_14',
-      'Saldo_Total',
+      'Saldo_TOTVS_Dourado_10',
+      'Saldo_WMS_Dourado_10',
+      'Divergencia_Dourado',
+      'Endereco_WMS_Dourado',
+      'Saldo_TOTVS_Parana_14',
+      'Saldo_WMS_Parana_14',
+      'Divergencia_Parana',
+      'Endereco_WMS_Parana',
       'Ponto_Encomenda_10',
       'Ponto_Encomenda_14',
       'Estoque_Seguranca_10',
@@ -232,6 +325,7 @@ export const TotvsImportView: React.FC<TotvsImportViewProps> = ({
       'Lead_Time_10_Dias',
       'Lead_Time_14_Dias',
       'Alerta_Obsoleto_Com_Saldo',
+      'Alerta_Divergencia_WMS_TOTVS',
     ];
 
     const rows = filteredAuditItems.map((i) => [
@@ -242,22 +336,28 @@ export const TotvsImportView: React.FC<TotvsImportViewProps> = ({
       `"${i.descricao60c.replace(/"/g, '""')}"`,
       `"${i.narrativa200c.replace(/"/g, '""')}"`,
       i.saldo10,
+      i.saldoWms10,
+      i.divergencia10,
+      `"${i.enderecoWms10}"`,
       i.saldo14,
-      i.totalSaldo,
+      i.saldoWms14,
+      i.divergencia14,
+      `"${i.enderecoWms14}"`,
       i.pontoEncomenda10,
       i.pontoEncomenda14,
       i.estoqueSeguranca10,
       i.estoqueSeguranca14,
       i.leadTime10,
       i.leadTime14,
-      i.hasObsoleteWithStockAlert ? 'SIM - ALERTA CRITICO' : 'NAO',
+      i.hasObsoleteWithStockAlert ? 'SIM' : 'NAO',
+      i.hasDivergenceAlert ? 'SIM - DIVERGENTE' : 'NAO - ALINHADO',
     ]);
 
     const csvContent = 'data:text/csv;charset=utf-8,\uFEFF' + [headers.join(';'), ...rows.map((r) => r.join(';'))].join('\n');
     const encodedUri = encodeURI(csvContent);
     const link = document.createElement('a');
     link.setAttribute('href', encodedUri);
-    link.setAttribute('download', `PremieRpet_Auditoria_Mescla_CE0348_Itens_${new Date().toISOString().slice(0, 10)}.csv`);
+    link.setAttribute('download', `PremieRpet_Auditoria_4Bases_TOTVS_WMS_${new Date().toISOString().slice(0, 10)}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -275,33 +375,33 @@ export const TotvsImportView: React.FC<TotvsImportViewProps> = ({
                 Módulo Exclusivo Master Admin
               </span>
               <span className="text-slate-400">·</span>
-              <span className="text-xs text-slate-500 font-mono">ERP TOTVS Protheus · Estabelecimentos 10 & 14</span>
+              <span className="text-xs text-slate-500 font-mono">Governança Central PremieRpet · TOTVS Protheus & WMS Industrial</span>
             </div>
             <h2 className="text-xl font-bold text-slate-900 tracking-tight">
               Carga & Auditoria TOTVS
             </h2>
-            <p className="text-xs text-slate-600 max-w-3xl leading-relaxed">
-              Módulo corporativo para upload e cruzamento das duas bases mestres do Protheus: o extrato transacional <strong>CE0348.csv</strong> (saldos físicos, pontos de encomenda, estoque de segurança almoxarifado e lead times de Dourado e Paraná) e o cadastro <strong>Itens.csv</strong> (validação da situação ativa vs. obsoleta).
+            <p className="text-xs text-slate-600 max-w-4xl leading-relaxed">
+              Console centralizado de carga e conciliação das 4 bases mestres da PremieRpet: o extrato contábil <strong>CE0348.csv</strong> (parâmetros de ressuprimento e saldos TOTVS Protheus), o cadastro <strong>Itens.csv</strong> (validação da situação ativa vs. obsoleta) e as extrações físicas de WMS <strong>Base 3 (Dourado/SP)</strong> e <strong>Base 4 (Porto Amazonas/PR)</strong> com a correlação exata de posições físicas (Coluna E - Endereço) e saldos WMS (Coluna D - QTD).
             </p>
           </div>
 
           <div className="flex items-center gap-2 shrink-0">
             <button
               onClick={handleExportAuditCSV}
-              className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold transition-colors border border-slate-200"
-              title="Exportar planilha de auditoria e saneamento"
+              className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold transition-colors border border-slate-200 shadow-2xs"
+              title="Exportar planilha consolidada de auditoria e saneamento"
             >
               <FileSpreadsheet className="w-4 h-4 text-emerald-700" />
-              <span>Exportar Auditoria (CSV)</span>
+              <span>Exportar Auditoria Completa (CSV)</span>
             </button>
           </div>
         </div>
       </div>
 
-      {/* 2. THE TWO DEDICATED CARDS / BUTTONS (CE0348 & ITENS) */}
+      {/* 2. THE FOUR DEDICATED CARDS / BLOCKS (BASE 1, 2, 3, 4) */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         
-        {/* CARD 1: BASE CE0348 */}
+        {/* CARD 1: BASE 1 - CE0348 (TOTVS TRANSACTIONAL) */}
         <div className="p-5 rounded-2xl bg-white border border-slate-200 shadow-2xs space-y-4">
           <div className="flex items-start justify-between gap-3">
             <div className="flex items-center gap-3">
@@ -310,10 +410,10 @@ export const TotvsImportView: React.FC<TotvsImportViewProps> = ({
               </div>
               <div>
                 <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
-                  Base 1 · Transacional
+                  Base 1 · Transacional TOTVS
                 </span>
                 <h3 className="text-sm font-bold text-slate-900 mt-1">
-                  Carga Base CE0348 (Saldos & Almoxarifado)
+                  Carga Base CE0348 (Saldos & Parâmetros)
                 </h3>
               </div>
             </div>
@@ -325,7 +425,7 @@ export const TotvsImportView: React.FC<TotvsImportViewProps> = ({
           </div>
 
           <p className="text-xs text-slate-500 leading-relaxed">
-            Relatório de situação dos estoques TOTVS. Alimenta o <strong>Saldo Estoque</strong>, <strong>Ponto de Encomenda</strong>, <strong>Estoque de segurança almoxarifado</strong>, <strong>Lead Time</strong>, <strong>Descrição (60c)</strong> e <strong>Narrativa (200c)</strong>.
+            Relatório de situação dos estoques TOTVS Protheus. Alimenta o <strong>Saldo Estoque</strong>, <strong>Ponto de Encomenda</strong>, <strong>Estoque de segurança almoxarifado</strong>, <strong>Lead Time</strong>, <strong>Descrição (60c)</strong> e <strong>Narrativa (200c)</strong>.
           </p>
 
           {/* Info Pill */}
@@ -335,8 +435,8 @@ export const TotvsImportView: React.FC<TotvsImportViewProps> = ({
               <strong className="text-slate-900 truncate max-w-[200px]" title={ce0348FileName}>{ce0348FileName}</strong>
             </div>
             <div className="flex items-center justify-between text-slate-700">
-              <span className="font-sans text-[11px]">Tamanho / Registros:</span>
-              <span>{ce0348FileSize} · {ce0348TotalLines.toLocaleString('pt-BR')} linhas</span>
+              <span className="font-sans text-[11px]">Tamanho / Linhas:</span>
+              <span>{ce0348FileSize} · {ce0348TotalLines.toLocaleString('pt-BR')} registros</span>
             </div>
             <div className="flex items-center justify-between text-slate-700 pt-1 border-t border-slate-200 text-[11px]">
               <span className="font-sans">Estabelecimentos:</span>
@@ -370,7 +470,7 @@ export const TotvsImportView: React.FC<TotvsImportViewProps> = ({
           </div>
         </div>
 
-        {/* CARD 2: BASE ITENS */}
+        {/* CARD 2: BASE 2 - ITENS (TOTVS CADASTRAL SB1) */}
         <div className="p-5 rounded-2xl bg-white border border-slate-200 shadow-2xs space-y-4">
           <div className="flex items-start justify-between gap-3">
             <div className="flex items-center gap-3">
@@ -394,7 +494,7 @@ export const TotvsImportView: React.FC<TotvsImportViewProps> = ({
           </div>
 
           <p className="text-xs text-slate-500 leading-relaxed">
-            Cadastro Mestre de Produtos do TOTVS. Utilizado <strong>exclusivamente pela Coluna I ("Situação")</strong> para validar itens como <strong>Ativo</strong> ou <strong>Totalmente Obsoleto</strong>.
+            Cadastro Mestre de Produtos do TOTVS Protheus. Utilizado <strong>exclusivamente pela Coluna I ("Situação")</strong> para validar itens como <strong>Ativo</strong> ou <strong>Totalmente Obsoleto</strong>.
           </p>
 
           {/* Info Pill */}
@@ -441,25 +541,163 @@ export const TotvsImportView: React.FC<TotvsImportViewProps> = ({
           </div>
         </div>
 
+        {/* CARD 3: BASE 3 - ARMAZENAMENTO DOURADO (WMS DOURADO) */}
+        <div className="p-5 rounded-2xl bg-white border border-slate-200 shadow-2xs space-y-4">
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-amber-100 text-amber-900 flex items-center justify-center shrink-0">
+                <Warehouse className="w-5 h-5 text-amber-800" />
+              </div>
+              <div>
+                <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-amber-900 bg-amber-50 px-2 py-0.5 rounded border border-amber-200">
+                  Base 3 · WMS Dourado
+                </span>
+                <h3 className="text-sm font-bold text-slate-900 mt-1">
+                  Base 3 - Armazenamento Dourado
+                </h3>
+              </div>
+            </div>
+
+            <span className="flex items-center gap-1 text-[11px] font-mono font-bold text-amber-800 bg-amber-50 px-2 py-0.5 rounded-full border border-amber-200 shrink-0">
+              <CheckCircle2 className="w-3.5 h-3.5 text-amber-700" />
+              <span>Carregado</span>
+            </span>
+          </div>
+
+          <p className="text-xs text-slate-500 leading-relaxed">
+            Extração física do WMS da unidade <strong>Dourado/SP</strong>. Corrige a aba <strong>Almoxarifado Local</strong> através da <strong>Coluna E ("ENDEREÇO")</strong> para a posição física e <strong>Coluna D ("QTD")</strong> para o saldo WMS.
+          </p>
+
+          {/* Info Pill */}
+          <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 space-y-1.5 font-mono text-xs">
+            <div className="flex items-center justify-between text-slate-700">
+              <span className="font-sans text-[11px]">Arquivo WMS:</span>
+              <strong className="text-slate-900 truncate max-w-[200px]" title={wmsDouradoFileName}>{wmsDouradoFileName}</strong>
+            </div>
+            <div className="flex items-center justify-between text-slate-700">
+              <span className="font-sans text-[11px]">Itens Endereçados:</span>
+              <span className="text-amber-900 font-bold">{wmsDouradoItemsCount.toLocaleString('pt-BR')} itens ({wmsDouradoTotalPieces.toLocaleString('pt-BR')} pçs)</span>
+            </div>
+            <div className="flex items-center justify-between text-slate-700 pt-1 border-t border-slate-200 text-[11px]">
+              <span className="font-sans">Posições / Registros:</span>
+              <span className="text-slate-800 font-bold">{wmsDouradoAddressesCount.toLocaleString('pt-BR')} endereços mapeados (Col E)</span>
+            </div>
+          </div>
+
+          {/* Upload and Reload Buttons */}
+          <div className="flex items-center gap-2 pt-1">
+            <label className="flex-1 flex items-center justify-center gap-2 px-3.5 py-2.5 bg-amber-700 hover:bg-amber-800 text-white rounded-xl font-bold text-xs shadow-2xs cursor-pointer transition-all active:scale-[0.98]">
+              <UploadCloud className="w-4 h-4" />
+              <span>Subir Novo WMS Dourado (.csv)</span>
+              <input
+                type="file"
+                accept=".csv, .txt"
+                onChange={handleUploadWmsDourado}
+                className="hidden"
+              />
+            </label>
+
+            <button
+              onClick={() => {
+                setWmsDouradoFileName('Estoque_Pe_as_-_ALM_PC__27__8df419a8.csv (Oficial WMS)');
+                setWmsDouradoLoaded(true);
+              }}
+              className="p-2.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-100 text-slate-700 transition-colors"
+              title="Restaurar arquivo oficial WMS de Dourado"
+            >
+              <RefreshCw className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+
+        {/* CARD 4: BASE 4 - ARMAZENAMENTO PORTO AMAZONAS (WMS PARANÁ) */}
+        <div className="p-5 rounded-2xl bg-white border border-slate-200 shadow-2xs space-y-4">
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-purple-100 text-purple-900 flex items-center justify-center shrink-0">
+                <Boxes className="w-5 h-5 text-purple-800" />
+              </div>
+              <div>
+                <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-purple-900 bg-purple-50 px-2 py-0.5 rounded border border-purple-200">
+                  Base 4 · WMS Porto Amazonas
+                </span>
+                <h3 className="text-sm font-bold text-slate-900 mt-1">
+                  Base 4 - Armazenamento Porto Amazonas
+                </h3>
+              </div>
+            </div>
+
+            <span className="flex items-center gap-1 text-[11px] font-mono font-bold text-purple-800 bg-purple-50 px-2 py-0.5 rounded-full border border-purple-200 shrink-0">
+              <CheckCircle2 className="w-3.5 h-3.5 text-purple-700" />
+              <span>Carregado</span>
+            </span>
+          </div>
+
+          <p className="text-xs text-slate-500 leading-relaxed">
+            Extração física do WMS da unidade <strong>Porto Amazonas/PR</strong>. Corrige a aba <strong>Almoxarifado Local</strong> através da <strong>Coluna E ("ENDEREÇO")</strong> para a posição física e <strong>Coluna D ("QTD")</strong> para o saldo WMS.
+          </p>
+
+          {/* Info Pill */}
+          <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 space-y-1.5 font-mono text-xs">
+            <div className="flex items-center justify-between text-slate-700">
+              <span className="font-sans text-[11px]">Arquivo WMS:</span>
+              <strong className="text-slate-900 truncate max-w-[200px]" title={wmsParanaFileName}>{wmsParanaFileName}</strong>
+            </div>
+            <div className="flex items-center justify-between text-slate-700">
+              <span className="font-sans text-[11px]">Itens Endereçados:</span>
+              <span className="text-purple-900 font-bold">{wmsParanaItemsCount.toLocaleString('pt-BR')} itens ({wmsParanaTotalPieces.toLocaleString('pt-BR')} pçs)</span>
+            </div>
+            <div className="flex items-center justify-between text-slate-700 pt-1 border-t border-slate-200 text-[11px]">
+              <span className="font-sans">Posições / Registros:</span>
+              <span className="text-slate-800 font-bold">{wmsParanaAddressesCount.toLocaleString('pt-BR')} endereços mapeados (Col E)</span>
+            </div>
+          </div>
+
+          {/* Upload and Reload Buttons */}
+          <div className="flex items-center gap-2 pt-1">
+            <label className="flex-1 flex items-center justify-center gap-2 px-3.5 py-2.5 bg-purple-700 hover:bg-purple-800 text-white rounded-xl font-bold text-xs shadow-2xs cursor-pointer transition-all active:scale-[0.98]">
+              <UploadCloud className="w-4 h-4" />
+              <span>Subir Novo WMS Paraná (.csv)</span>
+              <input
+                type="file"
+                accept=".csv, .txt"
+                onChange={handleUploadWmsParana}
+                className="hidden"
+              />
+            </label>
+
+            <button
+              onClick={() => {
+                setWmsParanaFileName('Estoque_WMS_Porto_Amazonas.csv (Oficial WMS Paraná)');
+                setWmsParanaLoaded(true);
+              }}
+              className="p-2.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-100 text-slate-700 transition-colors"
+              title="Restaurar arquivo oficial WMS de Porto Amazonas"
+            >
+              <RefreshCw className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+
       </div>
 
       {/* 3. CONSOLIDATION / EXECUTE MERGE BAR */}
-      <div className="p-5 rounded-2xl bg-gradient-to-r from-emerald-900 to-slate-900 text-white shadow-md flex flex-col md:flex-row items-center justify-between gap-4">
+      <div className="p-5 rounded-2xl bg-gradient-to-r from-emerald-900 via-slate-900 to-purple-950 text-white shadow-md flex flex-col md:flex-row items-center justify-between gap-4">
         <div className="space-y-1">
           <div className="flex items-center gap-2">
             <Sparkles className="w-4 h-4 text-amber-400" />
             <h3 className="text-sm font-bold tracking-tight">
-              Motor de Mescla & Saneamento Centralizado PremieRpet
+              Motor de Mescla Centralizado PremieRpet (4 Bases)
             </h3>
           </div>
-          <p className="text-xs text-slate-300 max-w-2xl">
-            Cruza o arquivo <strong>CE0348</strong> com a situação de <strong>Itens</strong> pela chave TOTVS, atualizando instantaneamente as consultas e saldos dos ambientes <strong>Master Admin</strong>, <strong>Dourado (10)</strong> e <strong>Porto Amazonas (14)</strong>.
+          <p className="text-xs text-slate-300 max-w-3xl">
+            Cruza simultaneamente <strong>Base 1 (CE0348)</strong>, <strong>Base 2 (Itens)</strong>, <strong>Base 3 (Armazenamento Dourado)</strong> e <strong>Base 4 (Armazenamento Porto Amazonas)</strong>. Atualiza instantaneamente a conciliação contábil e física em <strong>Master Admin</strong>, <strong>Dourado/SP</strong> e <strong>Porto Amazonas/PR</strong>.
           </p>
         </div>
 
         <div className="flex items-center gap-3 shrink-0">
           <div className="text-right hidden sm:block">
-            <div className="text-[10px] uppercase font-mono text-slate-400">Status da Base</div>
+            <div className="text-[10px] uppercase font-mono text-slate-400">Status da Mescla</div>
             <div className="text-xs font-mono font-bold text-emerald-400">{lastMergedTime}</div>
           </div>
 
@@ -469,7 +707,7 @@ export const TotvsImportView: React.FC<TotvsImportViewProps> = ({
             className="flex items-center gap-2 px-5 py-3 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs transition-all shadow-lg active:scale-95 disabled:opacity-50"
           >
             <RefreshCw className={`w-4 h-4 ${isMerging ? 'animate-spin' : ''}`} />
-            <span>{isMerging ? 'Processando Mescla...' : 'Executar Mescla & Atualizar Bases'}</span>
+            <span>{isMerging ? 'Processando Mescla das 4 Bases...' : 'Executar Mescla & Conciliar Bases'}</span>
           </button>
         </div>
       </div>
@@ -489,27 +727,33 @@ export const TotvsImportView: React.FC<TotvsImportViewProps> = ({
           <div className="text-xl font-bold font-mono text-emerald-800 mt-0.5">
             {stats.active.toLocaleString('pt-BR')}
           </div>
-          <span className="text-[10px] text-slate-500">Validados via Itens.csv</span>
-        </div>
-
-        <div className="p-4 rounded-xl bg-white border border-slate-200 shadow-2xs">
-          <span className="text-[10px] font-mono uppercase text-rose-700 block">Totalmente Obsoletos</span>
-          <div className="text-xl font-bold font-mono text-rose-800 mt-0.5">
-            {stats.obsolete.toLocaleString('pt-BR')}
-          </div>
-          <span className="text-[10px] text-slate-500">Inativos no ERP Protheus</span>
+          <span className="text-[10px] text-slate-500">Validados via Itens.csv (SB1)</span>
         </div>
 
         <div className={`p-4 rounded-xl border shadow-2xs ${
-          stats.obsoleteWithStock > 0 ? 'bg-amber-50/60 border-amber-300' : 'bg-white border-slate-200'
+          stats.divergent > 0 ? 'bg-amber-50/70 border-amber-300' : 'bg-white border-slate-200'
         }`}>
           <span className="text-[10px] font-mono uppercase text-amber-800 block font-bold">
-            Alerta: Obsoleto com Saldo
+            Divergências TOTVS vs. WMS
           </span>
           <div className="text-xl font-bold font-mono text-amber-900 mt-0.5">
-            {stats.obsoleteWithStock} SKUs
+            {stats.divergent.toLocaleString('pt-BR')} SKUs
           </div>
           <span className="text-[10px] text-amber-800">
+            Divergência entre CE0348 e WMS Físico
+          </span>
+        </div>
+
+        <div className={`p-4 rounded-xl border shadow-2xs ${
+          stats.obsoleteWithStock > 0 ? 'bg-rose-50/70 border-rose-300' : 'bg-white border-slate-200'
+        }`}>
+          <span className="text-[10px] font-mono uppercase text-rose-800 block font-bold">
+            Alerta: Obsoleto com Saldo
+          </span>
+          <div className="text-xl font-bold font-mono text-rose-900 mt-0.5">
+            {stats.obsoleteWithStock} SKUs
+          </div>
+          <span className="text-[10px] text-rose-800">
             Itens inativos que ainda têm estoque físico
           </span>
         </div>
@@ -525,7 +769,7 @@ export const TotvsImportView: React.FC<TotvsImportViewProps> = ({
             <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
             <input
               type="text"
-              placeholder="Buscar por código TOTVS (ex: 5040-0001), descrição curta (60c) ou narrativa técnica (200c)..."
+              placeholder="Buscar por código TOTVS (ex: 5040-0007), endereço WMS (ex: 03-008), descrição curta ou narrativa técnica..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="w-full pl-10 pr-4 py-2.5 bg-white border border-slate-200 rounded-xl text-xs text-slate-900 placeholder-slate-400 focus:outline-none focus:border-emerald-600 focus:ring-2 focus:ring-emerald-100 font-medium shadow-2xs"
@@ -555,6 +799,16 @@ export const TotvsImportView: React.FC<TotvsImportViewProps> = ({
               Ativos ({stats.active})
             </button>
             <button
+              onClick={() => setAuditFilter('divergent')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                auditFilter === 'divergent'
+                  ? 'bg-amber-600 text-white'
+                  : 'bg-white text-amber-800 border border-amber-300 hover:bg-amber-50'
+              }`}
+            >
+              Divergências WMS ({stats.divergent})
+            </button>
+            <button
               onClick={() => setAuditFilter('obsolete')}
               className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
                 auditFilter === 'obsolete'
@@ -568,11 +822,11 @@ export const TotvsImportView: React.FC<TotvsImportViewProps> = ({
               onClick={() => setAuditFilter('obsolete-with-stock')}
               className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
                 auditFilter === 'obsolete-with-stock'
-                  ? 'bg-amber-600 text-white'
-                  : 'bg-white text-amber-800 border border-amber-300 hover:bg-amber-50'
+                  ? 'bg-rose-900 text-white'
+                  : 'bg-white text-rose-900 border border-rose-300 hover:bg-rose-50'
               }`}
             >
-              Alertas ({stats.obsoleteWithStock})
+              Obsoleto c/ Estoque ({stats.obsoleteWithStock})
             </button>
           </div>
         </div>
@@ -587,8 +841,12 @@ export const TotvsImportView: React.FC<TotvsImportViewProps> = ({
                   <th className="py-3 px-4">Descrição Curta (60c)</th>
                   <th className="py-3 px-4">Narrativa Complementar (200c)</th>
                   <th className="py-3 px-4 text-center">Situação (Itens)</th>
-                  <th className="py-3 px-4 text-right">Saldo Dourado (10)</th>
-                  <th className="py-3 px-4 text-right">Saldo Paraná (14)</th>
+                  <th className="py-3 px-4 text-right bg-emerald-50/40 text-emerald-950 border-x border-emerald-100">
+                    Dourado (10) TOTVS / WMS
+                  </th>
+                  <th className="py-3 px-4 text-right bg-purple-50/40 text-purple-950 border-r border-purple-100">
+                    Paraná (14) TOTVS / WMS
+                  </th>
                   <th className="py-3 px-4 text-center">Diagnóstico</th>
                 </tr>
               </thead>
@@ -597,7 +855,13 @@ export const TotvsImportView: React.FC<TotvsImportViewProps> = ({
                   <tr
                     key={item.itemCode}
                     className={`hover:bg-slate-50/80 transition-colors ${
-                      item.hasObsoleteWithStockAlert ? 'bg-amber-50/40' : item.situacao === 'Totalmente Obsoleto' ? 'bg-slate-50/30 text-slate-500' : ''
+                      item.hasObsoleteWithStockAlert
+                        ? 'bg-rose-50/30'
+                        : item.hasDivergenceAlert
+                        ? 'bg-amber-50/30'
+                        : item.situacao === 'Totalmente Obsoleto'
+                        ? 'bg-slate-50/30 text-slate-500'
+                        : ''
                     }`}
                   >
                     <td className="py-3 px-4 whitespace-nowrap font-mono font-bold text-emerald-800">
@@ -631,28 +895,65 @@ export const TotvsImportView: React.FC<TotvsImportViewProps> = ({
                       </span>
                     </td>
 
-                    <td className="py-3 px-4 text-right whitespace-nowrap font-mono">
-                      <span className={item.saldo10 > 0 ? 'font-bold text-emerald-700' : 'text-slate-400'}>
-                        {item.saldo10} {item.un}
-                      </span>
+                    {/* DOURADO (10) TOTVS & WMS */}
+                    <td className="py-3 px-4 text-right whitespace-nowrap font-mono bg-emerald-50/20 border-x border-emerald-100">
+                      <div>
+                        <span className="text-slate-500 text-[10px]">TOTVS: </span>
+                        <span className={item.saldo10 > 0 ? 'font-bold text-emerald-800' : 'text-slate-400'}>
+                          {item.saldo10} {item.un}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-slate-500 text-[10px]">WMS: </span>
+                        <span className={item.saldoWms10 > 0 ? 'font-bold text-amber-900' : 'text-slate-400'}>
+                          {item.saldoWms10} {item.un}
+                        </span>
+                      </div>
+                      {item.enderecoWms10 && (
+                        <div className="text-[10px] text-blue-700 truncate max-w-[140px] mt-0.5 flex items-center justify-end gap-1" title={item.enderecoWms10}>
+                          <MapPin className="w-2.5 h-2.5" />
+                          <span>{item.enderecoWms10}</span>
+                        </div>
+                      )}
                     </td>
 
-                    <td className="py-3 px-4 text-right whitespace-nowrap font-mono">
-                      <span className={item.saldo14 > 0 ? 'font-bold text-emerald-700' : 'text-slate-400'}>
-                        {item.saldo14} {item.un}
-                      </span>
+                    {/* PARANÁ (14) TOTVS & WMS */}
+                    <td className="py-3 px-4 text-right whitespace-nowrap font-mono bg-purple-50/20 border-r border-purple-100">
+                      <div>
+                        <span className="text-slate-500 text-[10px]">TOTVS: </span>
+                        <span className={item.saldo14 > 0 ? 'font-bold text-emerald-800' : 'text-slate-400'}>
+                          {item.saldo14} {item.un}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-slate-500 text-[10px]">WMS: </span>
+                        <span className={item.saldoWms14 > 0 ? 'font-bold text-purple-900' : 'text-slate-400'}>
+                          {item.saldoWms14} {item.un}
+                        </span>
+                      </div>
+                      {item.enderecoWms14 && (
+                        <div className="text-[10px] text-blue-700 truncate max-w-[140px] mt-0.5 flex items-center justify-end gap-1" title={item.enderecoWms14}>
+                          <MapPin className="w-2.5 h-2.5" />
+                          <span>{item.enderecoWms14}</span>
+                        </div>
+                      )}
                     </td>
 
                     <td className="py-3 px-4 text-center whitespace-nowrap">
                       {item.hasObsoleteWithStockAlert ? (
-                        <span className="inline-flex items-center gap-1 text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-900 border border-amber-300">
-                          <AlertTriangle className="w-3 h-3 text-amber-700" />
+                        <span className="inline-flex items-center gap-1 text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-rose-100 text-rose-900 border border-rose-300">
+                          <AlertTriangle className="w-3 h-3 text-rose-700" />
                           <span>Obsoleto c/ Estoque</span>
+                        </span>
+                      ) : item.hasDivergenceAlert ? (
+                        <span className="inline-flex items-center gap-1 text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-900 border border-amber-300">
+                          <ArrowRightLeft className="w-3 h-3 text-amber-700" />
+                          <span>Divergência WMS</span>
                         </span>
                       ) : item.totalSaldo > 0 ? (
                         <span className="inline-flex items-center gap-1 text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200">
                           <Check className="w-3 h-3" />
-                          <span>Saldo Ativo</span>
+                          <span>Saldos Conciliados</span>
                         </span>
                       ) : (
                         <span className="text-[10px] font-mono text-slate-400">

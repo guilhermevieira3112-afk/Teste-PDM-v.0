@@ -89,3 +89,58 @@ export function matchTotvsSearch(
     matchedFields: Array.from(matchedFieldsSet),
   };
 }
+
+/**
+ * Matches an explicit list of validated search terms using strict AND logic
+ * across item description (60c), technical narrative (200c), code, family, and NCM.
+ */
+export function matchTotvsTokens(
+  item: PDMItem,
+  tokens: string[]
+): SearchMatchResult {
+  const cleanTokens = tokens.map((t) => t.trim().toLowerCase()).filter(Boolean);
+  if (cleanTokens.length === 0) {
+    return { isMatch: true, matchedFields: [] };
+  }
+
+  const codeStr = (item.totvsCode || item.pdmCode || '').toLowerCase();
+  const shortDescStr = (item.shortDescription || item.originalDescription || '').toLowerCase();
+  const narrativeStr = (item.narrative || item.longDescription || '').toLowerCase();
+  const familyStr = (item.totvsFamily || '').toLowerCase();
+  const ncmStr = (item.ncm || '').toLowerCase();
+
+  const matchedFieldsSet = new Set<'code' | 'shortDesc' | 'narrative' | 'family' | 'ncm'>();
+
+  const allMatch = cleanTokens.every((t) => {
+    let tokenMatched = false;
+
+    if (shortDescStr.includes(t)) {
+      matchedFieldsSet.add('shortDesc');
+      tokenMatched = true;
+    }
+    if (narrativeStr.includes(t)) {
+      matchedFieldsSet.add('narrative');
+      tokenMatched = true;
+    }
+    if (codeStr.includes(t)) {
+      matchedFieldsSet.add('code');
+      tokenMatched = true;
+    }
+    if (familyStr.includes(t)) {
+      matchedFieldsSet.add('family');
+      tokenMatched = true;
+    }
+    if (ncmStr.includes(t)) {
+      matchedFieldsSet.add('ncm');
+      tokenMatched = true;
+    }
+
+    return tokenMatched;
+  });
+
+  return {
+    isMatch: allMatch,
+    matchedFields: Array.from(matchedFieldsSet),
+  };
+}
+

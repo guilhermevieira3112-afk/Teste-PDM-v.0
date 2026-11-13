@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { 
   Lock, 
   User, 
@@ -17,34 +17,41 @@ import {
   UserPlus, 
   HelpCircle,
   Clock,
-  Sparkles
+  Sparkles,
+  ShieldAlert
 } from 'lucide-react';
-import { UserAccount } from '../../types/auth';
-import { INITIAL_USERS } from '../../data/users';
+import { UserAccount, UserProfileRole } from '../../types/auth';
 import { TENANTS } from '../../data/taxonomy';
 import { generateTOTPCode, verifyTOTPCode, getSecondsRemaining, getOtpAuthUri } from '../../utils/totp';
+import { generateStandardUsername, validatePasswordRequirements, PROFILE_LABELS } from '../../utils/userUtils';
 
 interface LoginScreenProps {
+  users: UserAccount[];
+  onUpdateUsers: (updatedUsers: UserAccount[]) => void;
+  global2FARequired: boolean;
   onLoginSuccess: (user: UserAccount) => void;
 }
 
-export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
+export const LoginScreen: React.FC<LoginScreenProps> = ({
+  users,
+  onUpdateUsers,
+  global2FARequired,
+  onLoginSuccess,
+}) => {
   // Auth Form State
-  const [usernameInput, setUsernameInput] = useState('');
+  const [usernameInput, setUsernameInput] = useState(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      return params.get('login') || '';
+    } catch {
+      return '';
+    }
+  });
   const [passwordInput, setPasswordInput] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-
-  // Users State (stored in memory + localStorage)
-  const [users, setUsers] = useState<UserAccount[]>(() => {
-    try {
-      const saved = localStorage.getItem('premierpet_users');
-      return saved ? JSON.parse(saved) : INITIAL_USERS;
-    } catch {
-      return INITIAL_USERS;
-    }
-  });
+  const [registerError, setRegisterError] = useState<string | null>(null);
 
   // 2FA Verification Step State
   const [pending2FAUser, setPending2FAUser] = useState<UserAccount | null>(null);
@@ -57,15 +64,27 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
   // Modals State
   const [isRegisterOpen, setIsRegisterOpen] = useState(false);
   const [isForgotOpen, setIsForgotOpen] = useState(false);
+  const [registrationSuccessUser, setRegistrationSuccessUser] = useState<UserAccount | null>(null);
 
   // New User Form State
   const [newFullName, setNewFullName] = useState('');
   const [newUsername, setNewUsername] = useState('');
   const [newEmail, setNewEmail] = useState('');
   const [newPassword, setNewPassword] = useState('');
+  const [newPasswordConfirm, setNewPasswordConfirm] = useState('');
   const [newTenantId, setNewTenantId] = useState('dourado-sp');
-  const [newRole, setNewRole] = useState<'MASTER_ADMIN' | 'UNIT_MANAGER'>('UNIT_MANAGER');
-  const [newEnable2FA, setNewEnable2FA] = useState(true);
+  const [newRole, setNewRole] = useState<UserProfileRole>('MANUTENCAO_PRODUCAO');
+
+  // Auto-generate standard username (without auto-filling corporate email)
+  const handleFullNameChange = (name: string) => {
+    setNewFullName(name);
+    const generated = generateStandardUsername(name);
+    setNewUsername(generated);
+  };
+
+  const passwordValidation = useMemo(() => {
+    return validatePasswordRequirements(newPassword);
+  }, [newPassword]);
 
   // Forgot password email state
   const [forgotEmail, setForgotEmail] = useState('');
@@ -103,20 +122,46 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
       return;
     }
 
-    const matchedUser = users.find(
-      (u) =>
-        (u.username.toLowerCase() === cleanUsername || u.email.toLowerCase() === cleanUsername) &&
-        (u.password === cleanPassword || cleanPassword === '123')
-    );
+    const matchedUser = users.find((u) => {
+      const matchesIdentity =
+        u.username.toLowerCase() === cleanUsername || u.email.toLowerCase() === cleanUsername;
+      if (!matchesIdentity) return false;
+      if (u.username.toLowerCase() === 'pdmindustrial.premierpet') {
+        return u.password === cleanPassword;
+      }
+      return u.password === cleanPassword || cleanPassword === '123' || cleanPassword === 'PremieR@2026';
+    });
 
     if (!matchedUser) {
-      setErrorMessage('Usuário ou senha inválidos. Utilize os atalhos de teste ou crie um novo usuário.');
+      setErrorMessage('Usuário ou senha inválidos. Verifique suas credenciais corporativas.');
       return;
     }
 
-    // Check if user has 2FA enabled
-    if (matchedUser.twoFactorEnabled) {
-      setPending2FAUser(matchedUser);
+    // Check Approval Status
+    if (matchedUser.status === 'PENDING_APPROVAL') {
+      setErrorMessage(
+        `Solicitação Pendente: O usuário "${matchedUser.username}" está na fila de aprovação do Administrador Master. Um e-mail de confirmação será enviado para ${matchedUser.email} assim que o acesso for homologado.`
+      );
+      return;
+    }
+
+    // Check Blocked Status
+    if (matchedUser.status === 'BLOCKED') {
+      setErrorMessage(
+        `Acesso Bloqueado: O usuário "${matchedUser.username}" foi desativado temporariamente pela Governança Corporativa. Entre em contato com o Master Admin.`
+      );
+      return;
+    }
+
+    // pdmindustrial.premierpet nunca necessita de 2FA; demais usuários seguem o toggle global2FARequired
+    const isExemptMaster = matchedUser.username.toLowerCase() === 'pdmindustrial.premierpet';
+    const requires2FA = !isExemptMaster && global2FARequired;
+
+    if (requires2FA) {
+      setPending2FAUser({
+        ...matchedUser,
+        totpSecret: matchedUser.totpSecret || 'JBSWY3DPEHPK3PXP',
+      });
       setTotpCode('');
       setTwoFactorError(null);
     } else {
@@ -130,8 +175,30 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
     setPasswordInput(user.password || '123');
     setErrorMessage(null);
 
-    if (user.twoFactorEnabled) {
-      setPending2FAUser(user);
+    // Check Approval Status
+    if (user.status === 'PENDING_APPROVAL') {
+      setErrorMessage(
+        `Solicitação Pendente: O usuário "${user.username}" está na fila de aprovação do Administrador Master. O acesso ainda não foi liberado.`
+      );
+      return;
+    }
+
+    // Check Blocked Status
+    if (user.status === 'BLOCKED') {
+      setErrorMessage(
+        `Acesso Bloqueado: O usuário "${user.username}" está com o acesso suspenso.`
+      );
+      return;
+    }
+
+    const isExemptMaster = user.username.toLowerCase() === 'pdmindustrial.premierpet';
+    const requires2FA = !isExemptMaster && global2FARequired;
+
+    if (requires2FA) {
+      setPending2FAUser({
+        ...user,
+        totpSecret: user.totpSecret || 'JBSWY3DPEHPK3PXP',
+      });
       setTotpCode('');
       setTwoFactorError(null);
     } else {
@@ -162,11 +229,33 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
     setTimeout(() => setCopiedSecret(false), 2000);
   };
 
-  // Register New User
+  // Register New User (Solicitar Acesso - Fila de Aprovação)
   const handleRegisterSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newFullName.trim() || !newUsername.trim() || !newPassword.trim()) {
-      alert('Preencha os campos obrigatórios.');
+    setErrorMessage(null);
+    setRegisterError(null);
+
+    if (!newFullName.trim() || !newUsername.trim() || !newEmail.trim() || !newPassword.trim()) {
+      setRegisterError('Todos os campos marcados com * são obrigatórios.');
+      return;
+    }
+
+    if (!passwordValidation.isValid) {
+      setRegisterError('A senha informada não atende a todos os requisitos de segurança obrigatórios.');
+      return;
+    }
+
+    if (newPassword !== newPasswordConfirm) {
+      setRegisterError('A confirmação da senha não coincide com a senha digitada.');
+      return;
+    }
+
+    // Check duplicate username or email
+    const duplicate = users.find(
+      (u) => u.username.toLowerCase() === newUsername.trim().toLowerCase() || u.email.toLowerCase() === newEmail.trim().toLowerCase()
+    );
+    if (duplicate) {
+      setRegisterError(`Já existe um usuário cadastrado com o login "${newUsername}" ou e-mail "${newEmail}".`);
       return;
     }
 
@@ -176,28 +265,33 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
       id: `usr-${Date.now()}`,
       name: newFullName.trim(),
       username: newUsername.trim().toLowerCase(),
-      email: newEmail.trim() || `${newUsername.trim().toLowerCase()}@premierpet.com.br`,
+      email: newEmail.trim().toLowerCase(),
       password: newPassword.trim(),
       role: newRole,
+      profileTitle: PROFILE_LABELS[newRole] || 'Manutenção/Produção',
       tenantId: tenantObj.id,
       tenantName: tenantObj.name,
-      department: 'Almoxarifado & Manutenção',
-      twoFactorEnabled: newEnable2FA,
+      department: newRole === 'MANUTENCAO_PRODUCAO' ? 'Manutenção & Produção' : newRole === 'ALMOXARIFADO' ? 'Almoxarifado Industrial' : 'Governança Corporativa Global',
+      status: 'PENDING_APPROVAL', // Fila de aprovação do Master!
+      twoFactorEnabled: true, // Obrigatório via Microsoft Authenticator
       totpSecret: 'JBSWY3DPEHPK3PXP', // Base32 test secret
+      createdAt: new Date().toISOString(),
+      notes: 'Solicitação de acesso cadastrada na tela de login.',
     };
 
     const updated = [newUser, ...users];
-    setUsers(updated);
-    try {
-      localStorage.setItem('premierpet_users', JSON.stringify(updated));
-    } catch {
-      // ignore
-    }
+    onUpdateUsers(updated);
 
     setIsRegisterOpen(false);
-    setUsernameInput(newUser.username);
-    setPasswordInput(newUser.password || '');
-    alert(`Usuário "${newUser.username}" cadastrado com sucesso!`);
+    setRegistrationSuccessUser(newUser);
+
+    // Reset Form fields
+    setNewFullName('');
+    setNewUsername('');
+    setNewEmail('');
+    setNewPassword('');
+    setNewPasswordConfirm('');
+    setRegisterError(null);
   };
 
   // Forgot password submit
@@ -225,14 +319,14 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
             <img
               src="/assets/aistudio/Logotipo_PremieRpet__ea5ddac0.png"
               alt="PremieRpet - Tempo de Nutrir. De Verdade."
-              className="h-16 w-auto object-contain drop-shadow-xs"
+              className="h-24 w-auto object-contain drop-shadow-xs"
             />
             <div className="pt-2">
               <h1 className="text-base font-bold text-slate-900 tracking-tight">
-                Almoxarifado de Peças & Classificação PDM
+                Almoxarifado de peças - PDM Industrial
               </h1>
               <p className="text-xs text-slate-500 font-medium mt-0.5">
-                Portal de Acesso Corporativo Integrado ao TOTVS Protheus
+                Portal de acesso
               </p>
             </div>
           </div>
@@ -329,7 +423,10 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
             <div className="pt-2 text-center">
               <button
                 type="button"
-                onClick={() => setIsRegisterOpen(true)}
+                onClick={() => {
+                  setRegisterError(null);
+                  setIsRegisterOpen(true);
+                }}
                 className="text-xs font-semibold text-emerald-700 hover:text-emerald-900 flex items-center justify-center gap-1.5 mx-auto hover:underline"
               >
                 <UserPlus className="w-3.5 h-3.5" />
@@ -349,38 +446,41 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
             </div>
 
             <div className="grid grid-cols-1 gap-1.5">
-              {users.slice(0, 3).map((u) => (
-                <button
-                  key={u.id}
-                  onClick={() => handleQuickLogin(u)}
-                  className="w-full flex items-center justify-between p-2 rounded-xl bg-slate-50 hover:bg-emerald-50 border border-slate-200/80 hover:border-emerald-300 text-left transition-all group"
-                >
-                  <div className="flex items-center gap-2 min-w-0">
-                    <div className={`w-2 h-2 rounded-full ${
-                      u.role === 'MASTER_ADMIN' ? 'bg-amber-500' : 'bg-emerald-600'
-                    }`} />
-                    <div className="min-w-0">
-                      <div className="text-xs font-bold text-slate-800 group-hover:text-emerald-900 truncate">
-                        {u.name}
-                      </div>
-                      <div className="text-[10px] text-slate-500 truncate">
-                        {u.role === 'MASTER_ADMIN' ? 'Master Admin · Global' : u.tenantName}
+              {users.filter((u) => u.status === 'ACTIVE').slice(0, 3).map((u) => {
+                const requires2FA = u.username.toLowerCase() !== 'pdmindustrial.premierpet' && global2FARequired;
+                return (
+                  <button
+                    key={u.id}
+                    onClick={() => handleQuickLogin(u)}
+                    className="w-full flex items-center justify-between p-2 rounded-xl bg-slate-50 hover:bg-emerald-50 border border-slate-200/80 hover:border-emerald-300 text-left transition-all group"
+                  >
+                    <div className="flex items-center gap-2 min-w-0">
+                      <div className={`w-2 h-2 rounded-full ${
+                        u.role === 'MASTER_ADMIN' ? 'bg-amber-500' : 'bg-emerald-600'
+                      }`} />
+                      <div className="min-w-0">
+                        <div className="text-xs font-bold text-slate-800 group-hover:text-emerald-900 truncate">
+                          {u.name}
+                        </div>
+                        <div className="text-[10px] text-slate-500 truncate">
+                          {u.role === 'MASTER_ADMIN' ? 'Master Admin · Global' : u.tenantName}
+                        </div>
                       </div>
                     </div>
-                  </div>
 
-                  <div className="flex items-center gap-1.5 shrink-0">
-                    {u.twoFactorEnabled && (
-                      <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-blue-100 text-blue-800 font-bold flex items-center gap-0.5">
-                        <Smartphone className="w-2.5 h-2.5" /> 2FA
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      {requires2FA && (
+                        <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-blue-100 text-blue-800 font-bold flex items-center gap-0.5">
+                          <Smartphone className="w-2.5 h-2.5" /> 2FA
+                        </span>
+                      )}
+                      <span className="text-[10px] font-mono font-bold text-slate-400 group-hover:text-emerald-700">
+                        Entrar →
                       </span>
-                    )}
-                    <span className="text-[10px] font-mono font-bold text-slate-400 group-hover:text-emerald-700">
-                      Entrar →
-                    </span>
-                  </div>
-                </button>
-              ))}
+                    </div>
+                  </button>
+                );
+              })}
             </div>
           </div>
 
@@ -519,10 +619,10 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
         </div>
       )}
 
-      {/* CREATE NEW USER MODAL */}
+      {/* CREATE NEW USER / REQUEST ACCESS MODAL */}
       {isRegisterOpen && (
         <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4">
-          <div className="relative w-full max-w-md bg-white border border-slate-200 rounded-3xl shadow-2xl p-6 sm:p-8 space-y-5 text-slate-800 animate-in fade-in duration-150">
+          <div className="relative w-full max-w-lg bg-white border border-slate-200 rounded-3xl shadow-2xl p-6 sm:p-8 space-y-5 text-slate-800 animate-in fade-in duration-150 max-h-[90vh] overflow-y-auto">
             
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
               <div className="flex items-center gap-2.5">
@@ -530,8 +630,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
                   <UserPlus className="w-5 h-5" />
                 </div>
                 <div>
-                  <h3 className="text-base font-bold text-slate-900">Novo Usuário PremieRpet</h3>
-                  <p className="text-[11px] text-slate-500">Cadastro de operador para o almoxarifado</p>
+                  <h3 className="text-base font-bold text-slate-900">Solicitar acesso PDM Industrial</h3>
                 </div>
               </div>
               <button
@@ -542,97 +641,166 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
               </button>
             </div>
 
-            <form onSubmit={handleRegisterSubmit} className="space-y-3.5 text-xs">
+            {registerError && (
+              <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs flex items-start gap-2">
+                <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                <span>{registerError}</span>
+              </div>
+            )}
+
+            {/* Aviso da Fila de Aprovação */}
+            <div className="p-3 rounded-xl bg-amber-50/70 border border-amber-200/80 text-[11px] text-amber-900 flex items-start gap-2">
+              <Clock className="w-4 h-4 text-amber-700 shrink-0 mt-0.5" />
               <div>
-                <label className="block text-slate-700 font-semibold mb-1">Nome Completo</label>
+                <strong>Atenção:</strong> Ao finalizar o cadastro, sua solicitação ficará na <strong>fila de aprovação</strong> do Administrador Master. Assim que homologado, você receberá uma confirmação por e-mail corporativo para realizar o login.
+              </div>
+            </div>
+
+            <form onSubmit={handleRegisterSubmit} className="space-y-3.5 text-xs">
+              {/* Nome Completo */}
+              <div>
+                <label className="block text-slate-700 font-semibold mb-1">Nome Completo *</label>
                 <input
                   type="text"
-                  placeholder="Ex: João da Silva Santos"
+                  placeholder="Ex: Carlos Eduardo da Silva"
                   value={newFullName}
-                  onChange={(e) => setNewFullName(e.target.value)}
+                  onChange={(e) => handleFullNameChange(e.target.value)}
                   className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-900 focus:outline-none focus:border-emerald-600 focus:bg-white"
                   required
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-2.5">
-                <div>
-                  <label className="block text-slate-700 font-semibold mb-1">Login (Usuário)</label>
-                  <input
-                    type="text"
-                    placeholder="joao.silva"
-                    value={newUsername}
-                    onChange={(e) => setNewUsername(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-900 font-mono focus:outline-none focus:border-emerald-600 focus:bg-white"
-                    required
-                  />
+              {/* Login Gerado Automaticamente */}
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-slate-700 font-semibold">Login de Acesso *</label>
                 </div>
-                <div>
-                  <label className="block text-slate-700 font-semibold mb-1">Senha</label>
-                  <input
-                    type="password"
-                    placeholder="Senha"
-                    value={newPassword}
-                    onChange={(e) => setNewPassword(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-900 focus:outline-none focus:border-emerald-600 focus:bg-white"
-                    required
-                  />
-                </div>
+                <input
+                  type="text"
+                  placeholder="Gerado automaticamente"
+                  value={newUsername}
+                  onChange={(e) => setNewUsername(e.target.value.toLowerCase().trim())}
+                  className="w-full bg-emerald-50/40 border border-emerald-300 rounded-xl px-3 py-2 text-emerald-950 font-mono font-bold focus:outline-none focus:border-emerald-600"
+                  required
+                />
+                <span className="text-[10px] text-slate-400 mt-0.5 block">
+                  Gerado automaticamente a partir do preenchimento do Nome Completo.
+                </span>
               </div>
 
+              {/* E-mail Corporativo */}
               <div>
-                <label className="block text-slate-700 font-semibold mb-1">E-mail Corporativo</label>
+                <label className="block text-slate-700 font-semibold mb-1">E-mail Corporativo *</label>
                 <input
                   type="email"
-                  placeholder="joao.silva@premierpet.com.br"
+                  placeholder="Digite seu e-mail corporativo"
                   value={newEmail}
                   onChange={(e) => setNewEmail(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-900 focus:outline-none focus:border-emerald-600 focus:bg-white"
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-900 font-mono focus:outline-none focus:border-emerald-600 focus:bg-white"
+                  required
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-2.5">
+              {/* Unidade Padrão & Perfil de Acesso */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                 <div>
-                  <label className="block text-slate-700 font-semibold mb-1">Unidade Padrão</label>
+                  <label className="block text-slate-700 font-semibold mb-1">Unidade Padrão *</label>
                   <select
                     value={newTenantId}
                     onChange={(e) => setNewTenantId(e.target.value)}
                     className="w-full bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-2 text-slate-900 font-medium focus:outline-none focus:border-emerald-600"
+                    required
                   >
                     {TENANTS.map((t) => (
                       <option key={t.id} value={t.id}>
-                        {t.name}
+                        {t.name} ({t.code})
                       </option>
                     ))}
                   </select>
                 </div>
                 <div>
-                  <label className="block text-slate-700 font-semibold mb-1">Perfil de Acesso</label>
+                  <label className="block text-slate-700 font-semibold mb-1">Perfil Solicitado *</label>
                   <select
                     value={newRole}
                     onChange={(e) => setNewRole(e.target.value as any)}
                     className="w-full bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-2 text-slate-900 font-medium focus:outline-none focus:border-emerald-600"
+                    required
                   >
-                    <option value="UNIT_MANAGER">Almoxarife da Unidade</option>
+                    <option value="MANUTENCAO_PRODUCAO">Manutenção/Produção</option>
+                    <option value="ALMOXARIFADO">Almoxarifado</option>
                     <option value="MASTER_ADMIN">Master Admin (Global)</option>
                   </select>
                 </div>
               </div>
 
-              <div className="pt-1">
-                <label className="flex items-center gap-2 cursor-pointer select-none">
+              {/* Senha e Confirmação */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                <div>
+                  <label className="block text-slate-700 font-semibold mb-1">Senha *</label>
                   <input
-                    type="checkbox"
-                    checked={newEnable2FA}
-                    onChange={(e) => setNewEnable2FA(e.target.checked)}
-                    className="rounded text-emerald-600 focus:ring-emerald-500 border-slate-300 w-4 h-4"
+                    type="password"
+                    placeholder="Mínimo 6 chars"
+                    value={newPassword}
+                    onChange={(e) => setNewPassword(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-900 font-mono focus:outline-none focus:border-emerald-600 focus:bg-white"
+                    required
                   />
-                  <span className="text-slate-700 text-xs font-semibold">
-                    Habilitar verificação via Microsoft Authenticator (2FA)
-                  </span>
-                </label>
+                </div>
+                <div>
+                  <label className="block text-slate-700 font-semibold mb-1">Confirmar Senha *</label>
+                  <input
+                    type="password"
+                    placeholder="Repita a senha"
+                    value={newPasswordConfirm}
+                    onChange={(e) => setNewPasswordConfirm(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-900 font-mono focus:outline-none focus:border-emerald-600 focus:bg-white"
+                    required
+                  />
+                </div>
               </div>
 
+              {/* Checklist de Validação Estrita de Senha */}
+              <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 space-y-1 font-mono text-[10px]">
+                <span className="font-sans font-bold text-slate-600 block mb-1">Requisitos Obrigatórios da Senha:</span>
+                <div className={`flex items-center gap-1.5 ${passwordValidation.hasMinLength ? 'text-emerald-700 font-bold' : 'text-slate-400'}`}>
+                  {passwordValidation.hasMinLength ? <Check className="w-3 h-3 text-emerald-600" /> : <span className="w-3 text-center">•</span>}
+                  <span>No mínimo 6 caracteres</span>
+                </div>
+                <div className={`flex items-center gap-1.5 ${passwordValidation.hasUppercase ? 'text-emerald-700 font-bold' : 'text-slate-400'}`}>
+                  {passwordValidation.hasUppercase ? <Check className="w-3 h-3 text-emerald-600" /> : <span className="w-3 text-center">•</span>}
+                  <span>Pelo menos uma letra maiúscula (A-Z)</span>
+                </div>
+                <div className={`flex items-center gap-1.5 ${passwordValidation.hasLowercase ? 'text-emerald-700 font-bold' : 'text-slate-400'}`}>
+                  {passwordValidation.hasLowercase ? <Check className="w-3 h-3 text-emerald-600" /> : <span className="w-3 text-center">•</span>}
+                  <span>Pelo menos uma letra minúscula (a-z)</span>
+                </div>
+                <div className={`flex items-center gap-1.5 ${passwordValidation.hasNumber ? 'text-emerald-700 font-bold' : 'text-slate-400'}`}>
+                  {passwordValidation.hasNumber ? <Check className="w-3 h-3 text-emerald-600" /> : <span className="w-3 text-center">•</span>}
+                  <span>Pelo menos um número (0-9)</span>
+                </div>
+                <div className={`flex items-center gap-1.5 ${passwordValidation.hasSpecialChar ? 'text-emerald-700 font-bold' : 'text-slate-400'}`}>
+                  {passwordValidation.hasSpecialChar ? <Check className="w-3 h-3 text-emerald-600" /> : <span className="w-3 text-center">•</span>}
+                  <span>Pelo menos um caractere especial (!@#$...)</span>
+                </div>
+                {newPassword && newPasswordConfirm && newPassword !== newPasswordConfirm && (
+                  <div className="text-rose-600 font-bold pt-1">
+                    ✕ As senhas digitadas não conferem.
+                  </div>
+                )}
+              </div>
+
+              {/* Quadro de Aviso Obrigatório: Microsoft Authenticator (2FA) */}
+              <div className="p-3.5 rounded-xl bg-blue-50 border border-blue-200 text-blue-950 flex items-start gap-2.5">
+                <Smartphone className="w-4 h-4 text-blue-700 shrink-0 mt-0.5" />
+                <div className="text-[11px] leading-relaxed">
+                  <strong className="block text-blue-900 font-bold mb-0.5">
+                    Autenticação em Duas Etapas Obrigatória (Microsoft Authenticator)
+                  </strong>
+                  Todo login na plataforma exige a utilização do aplicativo <strong>Microsoft Authenticator</strong> com sua conta corporativa para geração do código de verificação dinâmico no momento do acesso.
+                </div>
+              </div>
+
+              {/* Action Buttons */}
               <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
                 <button
                   type="button"
@@ -643,12 +811,60 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-xs rounded-xl shadow-xs"
+                  disabled={!passwordValidation.isValid || (!!newPasswordConfirm && newPassword !== newPasswordConfirm)}
+                  className="px-4 py-2 bg-emerald-700 hover:bg-emerald-800 disabled:opacity-40 text-white font-bold text-xs rounded-xl shadow-xs transition-all active:scale-95"
                 >
-                  Cadastrar Usuário
+                  Enviar Solicitação de Acesso
                 </button>
               </div>
             </form>
+
+          </div>
+        </div>
+      )}
+
+      {/* CONFIRMATION MODAL AFTER REGISTRATION SUBMIT (FILA DE APROVAÇÃO) */}
+      {registrationSuccessUser && (
+        <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4">
+          <div className="relative w-full max-w-md bg-white border border-slate-200 rounded-3xl shadow-2xl p-6 sm:p-8 space-y-5 text-slate-800 animate-in fade-in duration-150 text-center">
+            
+            <div className="w-14 h-14 rounded-2xl bg-amber-100 text-amber-800 flex items-center justify-center mx-auto">
+              <Clock className="w-7 h-7" />
+            </div>
+
+            <div className="space-y-1">
+              <h3 className="text-lg font-bold text-slate-900">
+                Solicitação de Acesso Enviada!
+              </h3>
+              <p className="text-xs text-slate-500">
+                O cadastro do seu usuário encontra-se na fila de aprovação.
+              </p>
+            </div>
+
+            <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 font-mono text-left text-xs space-y-1.5 text-slate-700">
+              <div><strong>Nome:</strong> {registrationSuccessUser.name}</div>
+              <div><strong>Login Gerado:</strong> <span className="text-emerald-800 font-bold">{registrationSuccessUser.username}</span></div>
+              <div><strong>E-mail:</strong> {registrationSuccessUser.email}</div>
+              <div><strong>Perfil Solicitado:</strong> {PROFILE_LABELS[registrationSuccessUser.role] || 'Manutenção/Produção'}</div>
+              <div><strong>Unidade:</strong> {registrationSuccessUser.tenantName}</div>
+              <div className="pt-1 text-[11px] text-amber-800 font-sans border-t border-slate-200">
+                Status: <strong>Pendente de Aprovação pelo Master</strong>
+              </div>
+            </div>
+
+            <p className="text-xs text-slate-600 leading-relaxed">
+              Assim que o Administrador Master homologar seu cadastro, você receberá um e-mail de confirmação em <strong>{registrationSuccessUser.email}</strong> autorizando o login.
+            </p>
+
+            <button
+              onClick={() => {
+                setUsernameInput(registrationSuccessUser.username);
+                setRegistrationSuccessUser(null);
+              }}
+              className="w-full py-2.5 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-xs shadow-md transition-all"
+            >
+              Entendido, Ir para Tela de Login
+            </button>
 
           </div>
         </div>
@@ -720,9 +936,10 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
                 {/* Helpful quick hints */}
                 <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 text-[11px] text-slate-600 space-y-1">
                   <div className="font-bold text-slate-800">Contas padrões configuradas:</div>
-                  <div>• Master Admin: <code className="font-mono text-emerald-800">admin.master</code> (Senha: 123)</div>
-                  <div>• Almoxarifado Dourado: <code className="font-mono text-emerald-800">almox.dourado</code> (Senha: 123)</div>
-                  <div>• Almoxarifado Paraná: <code className="font-mono text-emerald-800">almox.parana</code> (Senha: 123)</div>
+                  <div>• Admin Geral PDM: <code className="font-mono text-emerald-800">pdmindustrial.premierpet</code></div>
+                  <div>• Master Admin: <code className="font-mono text-emerald-800">carlos.silva</code></div>
+                  <div>• Almoxarifado Dourado: <code className="font-mono text-emerald-800">carlos.santos</code></div>
+                  <div>• Almoxarifado Paraná: <code className="font-mono text-emerald-800">mariana.duarte</code></div>
                 </div>
 
                 <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">

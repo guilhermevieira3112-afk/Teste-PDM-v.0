@@ -1,0 +1,18 @@
+{
+  "dourado": {
+    "fileName": "Estoque_Pe_as_-_ALM_PC__27__8df419a8.csv (Oficial WMS)",
+    "fileSize": "215 KB",
+    "totalLines": 6445,
+    "uniqueItems": 6114,
+    "totalQtd": 357247.0,
+    "totalAddresses": 6442
+  },
+  "portoAmazonas": {
+    "fileName": "Estoque_WMS_Porto_Amazonas.csv (Oficial WMS)",
+    "fileSize": "215 KB",
+    "totalLines": 6445,
+    "uniqueItems": 5296,
+    "totalQtd": 324108,
+    "totalAddresses": 5120
+  }
+}

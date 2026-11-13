@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { 
   Package, 
   Search, 
@@ -44,8 +44,11 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [criticismFilter, setCriticismFilter] = useState<'ALL' | CriticismLevel>('ALL');
-  const [stockStatusFilter, setStockStatusFilter] = useState<'ALL' | 'LOW' | 'NORMAL'>('ALL');
+  const [situationFilter, setSituationFilter] = useState<'ALL' | 'ACTIVE' | 'OBSOLETE' | 'OBSOLETE_WITH_STOCK'>('ALL');
+  const [stockStatusFilter, setStockStatusFilter] = useState<'ALL' | 'LOW' | 'NORMAL' | 'DIVERGENT' | 'ALIGNED'>('ALL');
   const [showHistoryModal, setShowHistoryModal] = useState(false);
+  const [currentPage, setCurrentPage] = useState<number>(1);
+  const pageSize = 50;
 
   // Active movement modal item
   const [movementModalData, setMovementModalData] = useState<{
@@ -74,17 +77,33 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
       const pdm = pdmMap.get(stock.pdmItemId);
       if (!pdm) return false;
 
+      // Situation filter: Ativo vs Obsoleto (Base Itens.csv Coluna I)
+      const isObsolete = pdm.situation?.toLowerCase().includes('obsoleto') || stock.status === 'INACTIVE';
+      if (situationFilter === 'ACTIVE' && isObsolete) return false;
+      if (situationFilter === 'OBSOLETE' && !isObsolete) return false;
+
+      const totvs = stock.totvsStock ?? stock.currentStock ?? 0;
+      const wms = stock.wmsStock ?? 0;
+      const isLow = totvs <= stock.minimumStock;
+      const isDivergent = Math.abs(totvs - wms) > 0.001;
+
+      if (situationFilter === 'OBSOLETE_WITH_STOCK' && (!isObsolete || (totvs <= 0 && wms <= 0))) return false;
+
       // Criticism filter
       if (criticismFilter !== 'ALL' && stock.criticism !== criticismFilter) return false;
 
-      // Low stock filter
-      const isLow = stock.currentStock <= stock.minimumStock;
+      // Low stock & Divergence filter
       if (stockStatusFilter === 'LOW' && !isLow) return false;
       if (stockStatusFilter === 'NORMAL' && isLow) return false;
+      if (stockStatusFilter === 'DIVERGENT' && !isDivergent) return false;
+      if (stockStatusFilter === 'ALIGNED' && isDivergent) return false;
 
-      // Search term (Cross-references internal code, TOTVS code, short description, and technical narrative)
+      // Search term (Cross-references internal code, TOTVS code, short description, technical narrative, and WMS address)
       if (!searchTerm) return true;
       const term = searchTerm.toLowerCase();
+      const addrMatch = (stock.wmsAddress && stock.wmsAddress.toLowerCase().includes(term)) ||
+                        (stock.storageLocation && stock.storageLocation.toLowerCase().includes(term));
+
       return (
         stock.internalCode.toLowerCase().includes(term) ||
         (pdm.totvsCode && pdm.totvsCode.toLowerCase().includes(term)) ||
@@ -93,20 +112,71 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
         (pdm.originalDescription && pdm.originalDescription.toLowerCase().includes(term)) ||
         (pdm.narrative && pdm.narrative.toLowerCase().includes(term)) ||
         (pdm.longDescription && pdm.longDescription.toLowerCase().includes(term)) ||
-        stock.storageLocation.toLowerCase().includes(term)
+        addrMatch
       );
     });
-  }, [currentStocks, pdmMap, criticismFilter, stockStatusFilter, searchTerm]);
+  }, [currentStocks, pdmMap, criticismFilter, situationFilter, stockStatusFilter, searchTerm]);
+
+  // Reset page when filter or search changes
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm, criticismFilter, situationFilter, stockStatusFilter]);
+
+  // Situation counts
+  const activeCount = useMemo(() => {
+    return currentStocks.filter((s) => {
+      const pdm = pdmMap.get(s.pdmItemId);
+      const isObsolete = pdm?.situation?.toLowerCase().includes('obsoleto') || s.status === 'INACTIVE';
+      return !isObsolete;
+    }).length;
+  }, [currentStocks, pdmMap]);
+
+  const obsoleteCount = useMemo(() => {
+    return currentStocks.filter((s) => {
+      const pdm = pdmMap.get(s.pdmItemId);
+      return pdm?.situation?.toLowerCase().includes('obsoleto') || s.status === 'INACTIVE';
+    }).length;
+  }, [currentStocks, pdmMap]);
+
+  const obsoleteWithStockCount = useMemo(() => {
+    return currentStocks.filter((s) => {
+      const pdm = pdmMap.get(s.pdmItemId);
+      const isObsolete = pdm?.situation?.toLowerCase().includes('obsoleto') || s.status === 'INACTIVE';
+      const totvs = s.totvsStock ?? s.currentStock ?? 0;
+      const wms = s.wmsStock ?? 0;
+      return isObsolete && (totvs > 0 || wms > 0);
+    }).length;
+  }, [currentStocks, pdmMap]);
 
   // KPI Calculations
-  const totalLockedCapital = useMemo(() => {
-    return currentStocks.reduce((sum, s) => sum + s.currentStock * s.unitCost, 0);
+  const totalLockedCapitalTotvs = useMemo(() => {
+    return currentStocks.reduce((sum, s) => sum + (s.totvsStock ?? s.currentStock) * s.unitCost, 0);
+  }, [currentStocks]);
+
+  const totalLockedCapitalWms = useMemo(() => {
+    return currentStocks.reduce((sum, s) => sum + (s.wmsStock ?? 0) * s.unitCost, 0);
   }, [currentStocks]);
 
   const totalSKUs = currentStocks.length;
 
   const lowStockCount = useMemo(() => {
-    return currentStocks.filter((s) => s.currentStock <= s.minimumStock).length;
+    return currentStocks.filter((s) => (s.totvsStock ?? s.currentStock) <= s.minimumStock).length;
+  }, [currentStocks]);
+
+  const divergentStockCount = useMemo(() => {
+    return currentStocks.filter((s) => {
+      const totvs = s.totvsStock ?? s.currentStock ?? 0;
+      const wms = s.wmsStock ?? 0;
+      return Math.abs(totvs - wms) > 0.001;
+    }).length;
+  }, [currentStocks]);
+
+  const totalWmsPieces = useMemo(() => {
+    return currentStocks.reduce((sum, s) => sum + (s.wmsStock ?? 0), 0);
+  }, [currentStocks]);
+
+  const totalTotvsPieces = useMemo(() => {
+    return currentStocks.reduce((sum, s) => sum + (s.totvsStock ?? s.currentStock ?? 0), 0);
   }, [currentStocks]);
 
   return (
@@ -117,7 +187,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
         <div>
           <div className="flex items-center gap-2">
             <h2 className="text-lg font-bold text-slate-900 tracking-tight flex items-center gap-2">
-              <span>Almoxarifado Industrial</span>
+              <span>Almoxarifado Industrial & WMS</span>
               <span className="text-xs font-mono font-bold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200">
                 {currentTenant.name} ({currentTenant.code})
               </span>
@@ -125,7 +195,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
           </div>
           <p className="text-xs text-slate-500 mt-1 flex items-center gap-1.5">
             <Building2 className="w-3.5 h-3.5 text-slate-400" />
-            <span>{currentTenant.unitType} · <strong>Dados Físicos & Custos Confidenciais desta Planta</strong></span>
+            <span>{currentTenant.unitType} · <strong>Conciliação Integrada: TOTVS Protheus (CE0348) vs. WMS Físico (Estoque Peças)</strong></span>
           </p>
         </div>
 
@@ -149,32 +219,52 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
       </div>
 
       {/* KPI METRIC CARDS (LIGHT THEME) */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {/* Total SKUs */}
         <div className="p-4 rounded-2xl bg-white border border-slate-200 shadow-xs">
           <div className="flex items-center justify-between text-slate-500 text-xs mb-1">
-            <span className="font-medium">SKUs Ativos na Planta</span>
+            <span className="font-medium">SKUs Cadastrados na Planta</span>
             <Package className="w-4 h-4 text-slate-400" />
           </div>
           <div className="text-2xl font-bold font-mono text-slate-900">
-            {totalSKUs}
+            {totalSKUs.toLocaleString('pt-BR')}
           </div>
-          <div className="text-[11px] text-slate-400 mt-1">
-            Itens vinculados à governança PremieRpet
+          <div className="text-[11px] mt-1 flex items-center justify-between font-mono">
+            <span className="text-emerald-700 font-bold">{activeCount.toLocaleString('pt-BR')} Ativos</span>
+            <span className="text-slate-400">·</span>
+            <span className="text-rose-700 font-bold">{obsoleteCount.toLocaleString('pt-BR')} Obsoletos</span>
           </div>
         </div>
 
-        {/* Capital Imobilizado */}
+        {/* Capital Imobilizado TOTVS */}
         <div className="p-4 rounded-2xl bg-white border border-slate-200 shadow-xs">
           <div className="flex items-center justify-between text-slate-500 text-xs mb-1">
-            <span className="font-medium">Capital Imobilizado em Estoque</span>
+            <span className="font-medium">Saldo Valorizado TOTVS</span>
             <DollarSign className="w-4 h-4 text-emerald-600" />
           </div>
           <div className="text-2xl font-bold font-mono text-emerald-700">
-            R$ {totalLockedCapital.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            R$ {totalLockedCapitalTotvs.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
           </div>
           <div className="text-[11px] text-slate-400 mt-1 font-mono">
-            Soma de (Saldo Atual × Custo Médio Local)
+            Base CE0348 (Saldo Estoque × Custo Médio)
+          </div>
+        </div>
+
+        {/* Auditoria Divergências WMS vs TOTVS */}
+        <div className={`p-4 rounded-2xl border shadow-xs ${
+          divergentStockCount > 0 ? 'bg-amber-50/50 border-amber-300' : 'bg-white border-slate-200'
+        }`}>
+          <div className="flex items-center justify-between text-xs mb-1">
+            <span className={divergentStockCount > 0 ? 'text-amber-800 font-bold' : 'text-slate-500 font-medium'}>
+              Divergências TOTVS vs. WMS
+            </span>
+            <ArrowRightLeft className={`w-4 h-4 ${divergentStockCount > 0 ? 'text-amber-600' : 'text-slate-400'}`} />
+          </div>
+          <div className={`text-2xl font-bold font-mono ${divergentStockCount > 0 ? 'text-amber-900' : 'text-slate-900'}`}>
+            {divergentStockCount} SKUs
+          </div>
+          <div className="text-[11px] text-amber-800/80 mt-1">
+            {divergentStockCount > 0 ? 'Discrepância física vs. contábil a sanar' : '100% dos saldos conciliados'}
           </div>
         </div>
 
@@ -199,30 +289,43 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
 
       {/* SEARCH AND FILTERS (LIGHT THEME) */}
       <div className="grid grid-cols-1 md:grid-cols-12 gap-3">
-        <div className="relative md:col-span-6">
+        {/* BUSCA GERAL */}
+        <div className="relative md:col-span-4">
           <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
           <input
             type="text"
-            placeholder="Buscar por código interno, TOTVS, descrição ou narrativa técnica (Festo, Andritz, part number)..."
+            placeholder="Buscar por código TOTVS, endereço WMS (ex: 03-008), descrição ou narrativa técnica..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             className="w-full pl-10 pr-4 py-2.5 bg-white border border-slate-200 rounded-xl text-xs text-slate-900 placeholder-slate-400 focus:outline-none focus:border-emerald-600 focus:ring-2 focus:ring-emerald-100 font-medium shadow-2xs"
           />
         </div>
 
+        {/* FILTRO: SITUAÇÃO (ATIVO OU OBSOLETO) */}
         <div className="md:col-span-3">
           <select
-            value={criticismFilter}
-            onChange={(e) => setCriticismFilter(e.target.value as any)}
-            className="w-full py-2.5 px-3 bg-white border border-slate-200 rounded-xl text-xs text-slate-800 focus:outline-none focus:border-emerald-600 focus:ring-2 focus:ring-emerald-100 font-semibold shadow-2xs"
+            value={situationFilter}
+            onChange={(e) => setSituationFilter(e.target.value as any)}
+            className={`w-full py-2.5 px-3 bg-white border rounded-xl text-xs font-semibold shadow-2xs focus:outline-none focus:ring-2 ${
+              situationFilter === 'OBSOLETE'
+                ? 'border-rose-300 text-rose-800 bg-rose-50/40 focus:border-rose-600 focus:ring-rose-100'
+                : situationFilter === 'ACTIVE'
+                ? 'border-emerald-300 text-emerald-800 bg-emerald-50/40 focus:border-emerald-600 focus:ring-emerald-100'
+                : situationFilter === 'OBSOLETE_WITH_STOCK'
+                ? 'border-amber-300 text-amber-800 bg-amber-50/40 focus:border-amber-600 focus:ring-amber-100'
+                : 'border-slate-200 text-slate-800 focus:border-emerald-600 focus:ring-emerald-100'
+            }`}
           >
-            <option value="ALL">Todas as Criticidades VED</option>
-            <option value="V">Classe V - Vital (Parada de Linha)</option>
-            <option value="E">Classe E - Essencial (Operação Limitada)</option>
-            <option value="D">Classe D - Desejável (Não Impeditivo)</option>
+            <option value="ALL">Todas as Situações ({activeCount} Ativos · {obsoleteCount} Obsoletos)</option>
+            <option value="ACTIVE">🟢 Somente Itens Ativos ({activeCount.toLocaleString('pt-BR')})</option>
+            <option value="OBSOLETE">🔴 Somente Totalmente Obsoletos ({obsoleteCount.toLocaleString('pt-BR')})</option>
+            {obsoleteWithStockCount > 0 && (
+              <option value="OBSOLETE_WITH_STOCK">⚠️ Obsoletos com Saldo em Estoque ({obsoleteWithStockCount})</option>
+            )}
           </select>
         </div>
 
+        {/* FILTRO: SALDOS & CONCILIAÇÃO TOTVS vs WMS */}
         <div className="md:col-span-3">
           <select
             value={stockStatusFilter}
@@ -230,8 +333,24 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
             className="w-full py-2.5 px-3 bg-white border border-slate-200 rounded-xl text-xs text-slate-800 focus:outline-none focus:border-emerald-600 focus:ring-2 focus:ring-emerald-100 font-semibold shadow-2xs"
           >
             <option value="ALL">Todos os Níveis de Estoque</option>
+            <option value="DIVERGENT">⚠️ Apenas com Divergência (TOTVS ≠ WMS)</option>
+            <option value="ALIGNED">✓ Apenas Saldos Conciliados (TOTVS = WMS)</option>
             <option value="LOW">Somente Alerta de Mínimo</option>
             <option value="NORMAL">Nível Nominal Adequado</option>
+          </select>
+        </div>
+
+        {/* FILTRO: CRITICIDADE VED */}
+        <div className="md:col-span-2">
+          <select
+            value={criticismFilter}
+            onChange={(e) => setCriticismFilter(e.target.value as any)}
+            className="w-full py-2.5 px-3 bg-white border border-slate-200 rounded-xl text-xs text-slate-800 focus:outline-none focus:border-emerald-600 focus:ring-2 focus:ring-emerald-100 font-semibold shadow-2xs"
+          >
+            <option value="ALL">Criticidade VED</option>
+            <option value="V">Classe V - Vital</option>
+            <option value="E">Classe E - Essencial</option>
+            <option value="D">Classe D - Desejável</option>
           </select>
         </div>
       </div>
@@ -244,9 +363,15 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
               <tr className="border-b border-slate-200 bg-slate-50/80 text-slate-500 font-mono text-[11px] uppercase tracking-wider">
                 <th className="py-3 px-4">Cód. Interno / TOTVS</th>
                 <th className="py-3 px-4">Descrição PDM Padronizada</th>
-                <th className="py-3 px-4">Localização Física</th>
+                <th className="py-3 px-4">Endereço WMS (Posição Física)</th>
                 <th className="py-3 px-4 text-center">Criticidade</th>
-                <th className="py-3 px-4 text-right">Saldo Atual</th>
+                <th className="py-3 px-4 text-right bg-emerald-50/50 text-emerald-900 border-x border-emerald-100">
+                  SALDO ATUAL TOTVS
+                </th>
+                <th className="py-3 px-4 text-right bg-blue-50/50 text-blue-900 border-r border-blue-100">
+                  SALDO ATUAL WMS
+                </th>
+                <th className="py-3 px-4 text-center">Conciliação</th>
                 <th className="py-3 px-4 text-right">Mín / Seg</th>
                 <th className="py-3 px-4 text-right">Custo Médio</th>
                 <th className="py-3 px-4 text-right">Valor Total</th>
@@ -256,32 +381,58 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
             <tbody className="divide-y divide-slate-100 font-sans">
               {filteredStocks.length === 0 ? (
                 <tr>
-                  <td colSpan={9} className="py-12 text-center text-slate-400 text-xs">
-                    Nenhum item localizado no almoxarifado desta unidade.
+                  <td colSpan={11} className="py-12 text-center text-slate-400 text-xs">
+                    Nenhum item localizado no almoxarifado desta unidade para o filtro aplicado.
                   </td>
                 </tr>
               ) : (
-                filteredStocks.map((stock) => {
+                filteredStocks.slice((currentPage - 1) * pageSize, currentPage * pageSize).map((stock) => {
                   const pdm = pdmMap.get(stock.pdmItemId);
                   if (!pdm) return null;
 
-                  const isLow = stock.currentStock <= stock.minimumStock;
-                  const totalStockValue = stock.currentStock * stock.unitCost;
+                  const totvsStock = stock.totvsStock ?? stock.currentStock ?? 0;
+                  const wmsStock = stock.wmsStock ?? 0;
+                  const divergence = Math.round((wmsStock - totvsStock) * 100) / 100;
+                  const isDivergent = Math.abs(divergence) > 0.001;
+                  const isLow = totvsStock <= stock.minimumStock;
+                  const totalStockValue = totvsStock * stock.unitCost;
+                  const wmsAddressDisplay = stock.wmsAddress || stock.storageLocation || 'Pendente WMS';
+
+                  const isItemObsolete = pdm.situation?.toLowerCase().includes('obsoleto') || stock.status === 'INACTIVE';
+                  const hasObsoleteWithStockAlert = isItemObsolete && (totvsStock > 0 || wmsStock > 0);
 
                   return (
                     <tr
                       key={stock.id}
                       className={`hover:bg-slate-50/80 transition-colors ${
-                        isLow ? 'bg-rose-50/30' : ''
+                        hasObsoleteWithStockAlert
+                          ? 'bg-amber-50/30'
+                          : isLow
+                          ? 'bg-rose-50/30'
+                          : isDivergent
+                          ? 'bg-amber-50/15'
+                          : ''
                       }`}
                     >
-                      {/* INTERNAL CODE */}
+                      {/* INTERNAL CODE & SITUAÇÃO */}
                       <td className="py-3 px-4 whitespace-nowrap">
                         <span className="font-mono font-bold text-emerald-800">
                           {stock.internalCode}
                         </span>
                         <div className="text-[10px] font-mono text-slate-400">
                           TOTVS: {pdm.totvsCode || pdm.pdmCode}
+                        </div>
+                        <div className="mt-1">
+                          <span
+                            className={`inline-block text-[9px] font-mono font-bold px-1.5 py-0.5 rounded ${
+                              isItemObsolete
+                                ? 'bg-rose-50 text-rose-800 border border-rose-200'
+                                : 'bg-emerald-50 text-emerald-800 border border-emerald-200'
+                            }`}
+                            title={`Situação Cadastral: ${isItemObsolete ? 'Totalmente Obsoleto no Protheus' : 'Ativo no Protheus'}`}
+                          >
+                            {isItemObsolete ? 'Totalmente Obsoleto' : 'Ativo'}
+                          </span>
                         </div>
                       </td>
 
@@ -301,11 +452,19 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                         )}
                       </td>
 
-                      {/* PHYSICAL LOCATION */}
-                      <td className="py-3 px-4 whitespace-nowrap text-slate-600">
+                      {/* PHYSICAL LOCATION / WMS ADDRESS (COLUNA E) */}
+                      <td className="py-3 px-4 whitespace-nowrap text-slate-700">
                         <div className="flex items-center gap-1.5 text-[11px]">
-                          <MapPin className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                          <span>{stock.storageLocation}</span>
+                          <MapPin className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+                          {stock.wmsAddress && stock.wmsAddress !== 'Pendente WMS' ? (
+                            <span className="font-mono font-bold text-blue-900 bg-blue-50 px-2 py-0.5 rounded border border-blue-200" title={stock.wmsAddress}>
+                              {stock.wmsAddress}
+                            </span>
+                          ) : (
+                            <span className="font-mono text-slate-400 italic">
+                              {stock.storageLocation || 'Pendente WMS'}
+                            </span>
+                          )}
                         </div>
                       </td>
 
@@ -324,21 +483,56 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                         </span>
                       </td>
 
-                      {/* CURRENT STOCK */}
-                      <td className="py-3 px-4 whitespace-nowrap text-right font-mono">
+                      {/* 1. SALDO ATUAL TOTVS (CE0348 COLUNA G) */}
+                      <td className="py-3 px-4 whitespace-nowrap text-right font-mono bg-emerald-50/20 border-x border-emerald-100">
                         <span
                           className={`text-sm font-bold ${
-                            isLow ? 'text-rose-600 font-extrabold' : 'text-slate-900'
+                            isLow ? 'text-rose-600 font-extrabold' : 'text-emerald-900'
                           }`}
                         >
-                          {stock.currentStock} {pdm.unitOfMeasure || 'UN'}
+                          {totvsStock} {pdm.unitOfMeasure || 'UN'}
                         </span>
+                        <div className="text-[10px] text-slate-400 font-sans">
+                          Base CE0348
+                        </div>
+                      </td>
+
+                      {/* 2. SALDO ATUAL WMS (ESTOQUE PEÇAS COLUNA D QTD) */}
+                      <td className="py-3 px-4 whitespace-nowrap text-right font-mono bg-blue-50/20 border-r border-blue-100">
+                        <span className="text-sm font-bold text-blue-900">
+                          {wmsStock} {pdm.unitOfMeasure || 'UN'}
+                        </span>
+                        <div className="text-[10px] text-slate-400 font-sans">
+                          WMS Peças
+                        </div>
+                      </td>
+
+                      {/* CONCILIAÇÃO & DELTA */}
+                      <td className="py-3 px-4 whitespace-nowrap text-center font-mono text-[11px]">
+                        {!isDivergent ? (
+                          <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-800 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full">
+                            <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                            <span>Conciliado</span>
+                          </span>
+                        ) : (
+                          <span
+                            className={`inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                              divergence > 0
+                                ? 'bg-amber-100 text-amber-900 border border-amber-300'
+                                : 'bg-rose-100 text-rose-900 border border-rose-300'
+                            }`}
+                            title={`Divergência: WMS possui ${divergence > 0 ? '+' : ''}${divergence} em relação ao TOTVS.`}
+                          >
+                            <AlertTriangle className="w-3 h-3" />
+                            <span>Δ {divergence > 0 ? `+${divergence}` : divergence}</span>
+                          </span>
+                        )}
                       </td>
 
                       {/* MIN / SAFETY */}
                       <td className="py-3 px-4 whitespace-nowrap text-right font-mono text-slate-500 text-[11px]">
                         <div>Mín: {stock.minimumStock}</div>
-                        <div className="text-[10px] text-slate-400">Seg: {stock.safetyStock}</div>
+                        <div className="text-[10px] text-slate-400">Seg: {stock.safetyStockWarehouse ?? stock.safetyStock}</div>
                       </td>
 
                       {/* UNIT COST */}
@@ -357,7 +551,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                           <button
                             onClick={() => onSelectItemDetail(pdm)}
                             className="p-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 transition-colors border border-slate-200"
-                            title="Ver ficha técnica e parâmetros TOTVS do item"
+                            title="Ver ficha técnica, posição WMS e parâmetros TOTVS do item"
                           >
                             <Eye className="w-3.5 h-3.5 text-emerald-700" />
                           </button>
@@ -379,16 +573,34 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
           </table>
         </div>
 
-        {/* FOOTER */}
-        <div className="px-5 py-3 border-t border-slate-200 bg-slate-50/70 flex items-center justify-between text-xs text-slate-500">
-          <span>
-            Mostrando <strong className="text-slate-800">{filteredStocks.length}</strong> de <strong className="text-slate-800">{currentStocks.length}</strong> itens estocados nesta planta
-          </span>
-          <span className="font-mono text-[11px] text-slate-400">
-            Inventário Contínuo PremieRpet
-          </span>
+        {/* PAGINATION AND FOOTER */}
+        <div className="px-5 py-3 border-t border-slate-200 bg-slate-50/70 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-slate-600">
+          <div>
+            Exibindo <strong>{Math.min(filteredStocks.length, (currentPage - 1) * pageSize + 1)}</strong> a <strong>{Math.min(currentPage * pageSize, filteredStocks.length)}</strong> de <strong>{filteredStocks.length}</strong> itens no almoxarifado de {currentTenant.name}
+          </div>
+          
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+              disabled={currentPage === 1}
+              className="px-3 py-1 rounded-lg border border-slate-200 bg-white text-xs font-semibold disabled:opacity-40 hover:bg-slate-50"
+            >
+              Anterior
+            </button>
+            <span className="font-mono text-xs">
+              Pág. {currentPage} de {Math.max(1, Math.ceil(filteredStocks.length / pageSize))}
+            </span>
+            <button
+              onClick={() => setCurrentPage((p) => p + 1)}
+              disabled={currentPage >= Math.ceil(filteredStocks.length / pageSize)}
+              className="px-3 py-1 rounded-lg border border-slate-200 bg-white text-xs font-semibold disabled:opacity-40 hover:bg-slate-50"
+            >
+              Próxima
+            </button>
+          </div>
         </div>
       </div>
+
 
       {/* MOVEMENT REGISTRATION MODAL */}
       {movementModalData && (

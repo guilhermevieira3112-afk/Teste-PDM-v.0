@@ -11,10 +11,15 @@ import {
   ShieldAlert, 
   Info,
   Image as ImageIcon,
-  Sliders
+  Sliders,
+  DollarSign,
+  Paperclip,
+  FileCheck,
+  Check
 } from 'lucide-react';
-import { Group, Subgroup, SpecificSubgroup, PDMItem, UserRole, Tenant } from '../../types/pdm';
+import { Group, Subgroup, SpecificSubgroup, PDMItem, UserRole, Tenant, AttributeDefinition, ApprovalTierLevel, ApprovalStepRecord } from '../../types/pdm';
 import { INDUSTRIAL_TAXONOMY } from '../../data/taxonomy';
+import { PdmNivelItem, INITIAL_PDM_NIVEIS, getNiveis1List, getNiveis2List, getNiveis3List } from '../../data/pdmNiveisData';
 import { generateShortDescription, generateLongDescription, calculateDuplicateSimilarity } from '../../utils/pdmGenerator';
 
 interface PDMBuilderModalProps {
@@ -24,6 +29,7 @@ interface PDMBuilderModalProps {
   currentTenant: Tenant;
   existingItems: PDMItem[];
   onSaveItem: (item: Partial<PDMItem>) => void;
+  pdmLevels?: PdmNivelItem[];
 }
 
 export const PDMBuilderModal: React.FC<PDMBuilderModalProps> = ({
@@ -33,6 +39,7 @@ export const PDMBuilderModal: React.FC<PDMBuilderModalProps> = ({
   currentTenant,
   existingItems,
   onSaveItem,
+  pdmLevels,
 }) => {
   const [selectedGroupId, setSelectedGroupId] = useState<string>(INDUSTRIAL_TAXONOMY[0].id);
   const [selectedSubgroupId, setSelectedSubgroupId] = useState<string>(INDUSTRIAL_TAXONOMY[0].subgroups[0].id);
@@ -54,26 +61,76 @@ export const PDMBuilderModal: React.FC<PDMBuilderModalProps> = ({
   const [unitOfMeasureInput, setUnitOfMeasureInput] = useState<string>('UN');
   const [targetEstab, setTargetEstab] = useState<'10' | '14' | 'BOTH'>('10');
 
-  // Find active group, subgroup and specific subgroup
+  // Quotation (Orçamento / Proposta Comercial obrigatório para novos itens)
+  const [supplierNameInput, setSupplierNameInput] = useState<string>('SKF do Brasil Ltda');
+  const [quoteNumberInput, setQuoteNumberInput] = useState<string>('COT-2026-0849');
+  const [quoteValueInput, setQuoteValueInput] = useState<number | ''>(850);
+  const [quoteFileName, setQuoteFileName] = useState<string>('Orcamento_Comercial_Fornecedor_SKF.pdf');
+  const [quoteNotesInput, setQuoteNotesInput] = useState<string>('Proposta com frete CIF Fábrica PremieRpet e garantia técnica de 12 meses.');
+
+  // MRO 3-Level Dynamic Classification (Niveis_PDM_MRO_Padronizado)
+  const effectiveLevels = useMemo(() => (pdmLevels && pdmLevels.length > 0 ? pdmLevels : INITIAL_PDM_NIVEIS), [pdmLevels]);
+  const niveis1Options = useMemo(() => getNiveis1List(effectiveLevels), [effectiveLevels]);
+  const [selectedNivel1, setSelectedNivel1] = useState<string>(() => niveis1Options[0] || 'Mecânica e Transmissão');
+  
+  const niveis2Options = useMemo(() => {
+    return getNiveis2List(effectiveLevels, selectedNivel1);
+  }, [effectiveLevels, selectedNivel1]);
+  const [selectedNivel2, setSelectedNivel2] = useState<string>(() => niveis2Options[0] || '');
+
+  const niveis3Options = useMemo(() => {
+    return getNiveis3List(effectiveLevels, selectedNivel1, selectedNivel2);
+  }, [effectiveLevels, selectedNivel1, selectedNivel2]);
+  const [selectedNivel3, setSelectedNivel3] = useState<string>(() => niveis3Options[0] || '');
+
+  const handleNivel1Change = (n1: string) => {
+    setSelectedNivel1(n1);
+    const n2s = getNiveis2List(effectiveLevels, n1);
+    const firstN2 = n2s[0] || '';
+    setSelectedNivel2(firstN2);
+    const n3s = getNiveis3List(effectiveLevels, n1, firstN2);
+    setSelectedNivel3(n3s[0] || '');
+
+    // Map to group taxonomy for attributes
+    const lower = n1.toLowerCase();
+    if (lower.includes('elétric') || lower.includes('automa')) {
+      handleGroupChange('grp-eletrica');
+    } else if (lower.includes('hidrául') || lower.includes('pneumát') || lower.includes('utilidade')) {
+      handleGroupChange('grp-tubulacao');
+    } else {
+      handleGroupChange('grp-mecanica');
+    }
+  };
+
+  const handleNivel2Change = (n2: string) => {
+    setSelectedNivel2(n2);
+    const n3s = getNiveis3List(effectiveLevels, selectedNivel1, n2);
+    setSelectedNivel3(n3s[0] || '');
+  };
+
+  const handleNivel3Change = (n3: string) => {
+    setSelectedNivel3(n3);
+  };
+
   const activeGroup = useMemo(() => 
-    INDUSTRIAL_TAXONOMY.find((g) => g.id === selectedGroupId) || INDUSTRIAL_TAXONOMY[0],
+    INDUSTRIAL_TAXONOMY.find((g: Group) => g.id === selectedGroupId) || INDUSTRIAL_TAXONOMY[0],
     [selectedGroupId]
   );
 
   const activeSubgroup = useMemo(() => 
-    activeGroup.subgroups.find((s) => s.id === selectedSubgroupId) || activeGroup.subgroups[0],
+    activeGroup.subgroups.find((s: Subgroup) => s.id === selectedSubgroupId) || activeGroup.subgroups[0],
     [activeGroup, selectedSubgroupId]
   );
 
   const activeSpecificSubgroup = useMemo(() => 
-    activeSubgroup.specificSubgroups.find((spec) => spec.id === selectedSpecificSubgroupId) || activeSubgroup.specificSubgroups[0],
+    activeSubgroup.specificSubgroups.find((spec: SpecificSubgroup) => spec.id === selectedSpecificSubgroupId) || activeSubgroup.specificSubgroups[0],
     [activeSubgroup, selectedSpecificSubgroupId]
   );
 
   // When changing specific subgroup, reset attributes
   const handleGroupChange = (groupId: string) => {
     setSelectedGroupId(groupId);
-    const grp = INDUSTRIAL_TAXONOMY.find((g) => g.id === groupId);
+    const grp = INDUSTRIAL_TAXONOMY.find((g: Group) => g.id === groupId);
     if (grp && grp.subgroups.length > 0) {
       setSelectedSubgroupId(grp.subgroups[0].id);
       if (grp.subgroups[0].specificSubgroups.length > 0) {
@@ -85,7 +142,7 @@ export const PDMBuilderModal: React.FC<PDMBuilderModalProps> = ({
 
   const handleSubgroupChange = (subgroupId: string) => {
     setSelectedSubgroupId(subgroupId);
-    const sub = activeGroup.subgroups.find((s) => s.id === subgroupId);
+    const sub = activeGroup.subgroups.find((s: Subgroup) => s.id === subgroupId);
     if (sub && sub.specificSubgroups.length > 0) {
       setSelectedSpecificSubgroupId(sub.specificSubgroups[0].id);
     }
@@ -166,11 +223,30 @@ export const PDMBuilderModal: React.FC<PDMBuilderModalProps> = ({
 
     // Check mandatory fields
     const missingFields = activeSpecificSubgroup.attributeDefinitions
-      .filter((def) => def.required && !attributes[def.id])
-      .map((def) => def.label);
+      .filter((def: AttributeDefinition) => def.required && !attributes[def.id])
+      .map((def: AttributeDefinition) => def.label);
 
     if (missingFields.length > 0) {
       alert(`Por favor preencha os campos obrigatórios: ${missingFields.join(', ')}`);
+      return;
+    }
+
+    // Check quotation mandatory fields (conforme governança PremieRpet)
+    if (!supplierNameInput.trim()) {
+      alert('O Nome do Fornecedor Cotado no Orçamento é obrigatório.');
+      return;
+    }
+    if (!quoteNumberInput.trim()) {
+      alert('O Número da Cotação / Orçamento é obrigatório.');
+      return;
+    }
+    const quoteVal = Number(quoteValueInput) || 0;
+    if (quoteVal <= 0) {
+      alert('O Valor Estimado do Orçamento (R$) é obrigatório e deve ser maior que R$ 0,00.');
+      return;
+    }
+    if (!quoteFileName.trim()) {
+      alert('O Anexo / Documento do Orçamento é obrigatório para cadastro de novos itens PDM.');
       return;
     }
 
@@ -183,6 +259,47 @@ export const PDMBuilderModal: React.FC<PDMBuilderModalProps> = ({
       : duplicateWarning && duplicateWarning.score >= 85 
         ? 'FLAGGED_DUPLICATE' 
         : 'PENDING_REVIEW';
+
+    // Determinar Alçadas de Aprovação por Valor:
+    // Até R$ 1.000 -> Nível 1
+    // R$ 1.000,01 a R$ 10.000 -> Nível 1 e 2
+    // Acima de R$ 10.000 -> Nível 1, 2 e 3
+    let requiredTiers: ApprovalTierLevel[] = [1];
+    if (quoteVal > 10000) {
+      requiredTiers = [1, 2, 3];
+    } else if (quoteVal > 1000) {
+      requiredTiers = [1, 2];
+    }
+
+    const approvalSteps: ApprovalStepRecord[] = [
+      {
+        tier: 1,
+        tierLabel: 'Aprovador Nível 1 (até R$ 1.000,00)',
+        status: isMaster ? 'APPROVED' : 'PENDING',
+        approvedByUser: isMaster ? 'Master Admin' : undefined,
+        approvedAt: isMaster ? new Date().toISOString() : undefined,
+      },
+    ];
+
+    if (requiredTiers.includes(2)) {
+      approvalSteps.push({
+        tier: 2,
+        tierLabel: 'Aprovador Nível 2 (até R$ 10.000,00)',
+        status: isMaster ? 'APPROVED' : 'WAITING_PREVIOUS_TIER',
+        approvedByUser: isMaster ? 'Master Admin' : undefined,
+        approvedAt: isMaster ? new Date().toISOString() : undefined,
+      });
+    }
+
+    if (requiredTiers.includes(3)) {
+      approvalSteps.push({
+        tier: 3,
+        tierLabel: 'Aprovador Nível 3 (> R$ 10.000,00)',
+        status: isMaster ? 'APPROVED' : 'WAITING_PREVIOUS_TIER',
+        approvedByUser: isMaster ? 'Master Admin' : undefined,
+        approvedAt: isMaster ? new Date().toISOString() : undefined,
+      });
+    }
 
     const establishments: Record<string, any> = {};
     const e10Stock = {
@@ -211,16 +328,22 @@ export const PDMBuilderModal: React.FC<PDMBuilderModalProps> = ({
 
     const finalNarrative = narrativeInput.trim().slice(0, 200);
 
+    const requesterName = isMaster ? 'Master Admin' : `Almoxarife PremieRpet (${currentTenant.code})`;
+
     const newItemData: Partial<PDMItem> = {
       groupId: activeGroup.id,
       subgroupId: activeSubgroup.id,
       specificSubgroupId: activeSpecificSubgroup.id,
+      nivel1: selectedNivel1,
+      nivel2: selectedNivel2,
+      nivel3: selectedNivel3,
       shortDescription: shortDescResult.shortDescription,
       narrative: finalNarrative,
       longDescription: finalNarrative ? `${shortDescResult.shortDescription} - ${finalNarrative}` : longDesc,
       attributes,
       ncm,
       unspsc,
+      baseValue: quoteVal,
       genericImage: imagePreview || undefined,
       status,
       notes: notes.trim(),
@@ -233,9 +356,41 @@ export const PDMBuilderModal: React.FC<PDMBuilderModalProps> = ({
       totvsPlant: targetEstab === 'BOTH' ? 'Dourado & Paraná' : (targetEstab === '10' ? 'Dourado' : 'Paraná'),
       requestedByTenantId: isMaster ? undefined : currentTenant.id,
       requestedByTenantName: isMaster ? undefined : currentTenant.name,
-      requestedByUser: isMaster ? 'Master Admin' : `Almoxarife PremieRpet (${currentTenant.code})`,
+      requestedByUser: requesterName,
       duplicateOfId: duplicateWarning ? duplicateWarning.item.id : undefined,
       similarityScore: duplicateWarning ? duplicateWarning.score : undefined,
+      // Orçamento Obrigatório
+      quotation: {
+        supplierName: supplierNameInput.trim(),
+        quoteNumber: quoteNumberInput.trim(),
+        estimatedValue: quoteVal,
+        fileName: quoteFileName.trim(),
+        fileSize: '482 KB',
+        fileDate: new Date().toISOString(),
+        notes: quoteNotesInput.trim(),
+      },
+      // Esteira de Aprovação por Valor
+      approvalWorkflow: {
+        requiredTiers,
+        currentPendingTier: isMaster ? null : 1,
+        estimatedValue: quoteVal,
+        steps: approvalSteps,
+        isFullyApproved: isMaster,
+      },
+      // Trilha de Auditoria Inicial
+      changeHistory: [
+        {
+          id: 'hist-' + Date.now(),
+          timestamp: new Date().toISOString(),
+          actionType: 'CREATED',
+          actionLabel: 'Solicitação de Cadastro PDM Enviada',
+          requestedByUser: requesterName,
+          requestedByTenantName: currentTenant.name,
+          status: isMaster ? 'APPROVED' : 'PENDING',
+          reason: `Solicitação criada com Orçamento do Fornecedor ${supplierNameInput.trim()} (Cotação ${quoteNumberInput.trim()}, Valor R$ ${quoteVal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}). Alçada requerida: ${requiredTiers.map(t => 'Nível ' + t).join(' + ')}.`,
+          changes: [],
+        },
+      ],
     };
 
     onSaveItem(newItemData);
@@ -303,63 +458,83 @@ export const PDMBuilderModal: React.FC<PDMBuilderModalProps> = ({
             </div>
           )}
 
-          {/* 1. TAXONOMIC CASCADE SELECTORS (3 NÍVEIS) */}
+          {/* 1. TAXONOMIC CASCADE SELECTORS (3 NÍVEIS MRO PADRONIZADO) */}
           <div className="space-y-3 p-4 rounded-xl bg-slate-50 border border-slate-200">
-            <div className="text-xs font-mono font-bold uppercase tracking-wider text-emerald-800 flex items-center gap-2">
-              <Layers className="w-4 h-4 text-emerald-700" />
-              <span>1. Classificação Taxonômica (Grupo / Subgrupo / Família)</span>
+            <div className="flex items-center justify-between">
+              <div className="text-xs font-mono font-bold uppercase tracking-wider text-emerald-800 flex items-center gap-2">
+                <Layers className="w-4 h-4 text-emerald-700" />
+                <span>1. Classificação Taxonômica MRO (Estrutura de 3 Níveis PremieRpet)</span>
+              </div>
+              <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300">
+                Base MRO Níveis Oficial
+              </span>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-              {/* Grupo */}
+              {/* Nível 1 */}
               <div>
-                <label className="block text-[11px] font-semibold text-slate-600 mb-1">
-                  Nível 1 · Grupo Industrial
-                </label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-[11px] font-semibold text-slate-700">
+                    Nível 1 · Grupo Macro *
+                  </label>
+                  <span className="text-[10px] font-mono text-slate-400">
+                    {niveis1Options.length} grupos
+                  </span>
+                </div>
                 <select
-                  value={selectedGroupId}
-                  onChange={(e) => handleGroupChange(e.target.value)}
+                  value={selectedNivel1}
+                  onChange={(e) => handleNivel1Change(e.target.value)}
                   className="w-full text-xs bg-white border border-slate-200 rounded-xl px-3 py-2 text-slate-900 focus:outline-none focus:border-emerald-600 focus:ring-2 focus:ring-emerald-100 font-semibold shadow-2xs"
                 >
-                  {INDUSTRIAL_TAXONOMY.map((g) => (
-                    <option key={g.id} value={g.id}>
-                      {g.code} - {g.name}
+                  {niveis1Options.map((n1) => (
+                    <option key={n1} value={n1}>
+                      {n1}
                     </option>
                   ))}
                 </select>
               </div>
 
-              {/* Subgrupo */}
+              {/* Nível 2 */}
               <div>
-                <label className="block text-[11px] font-semibold text-slate-600 mb-1">
-                  Nível 2 · Subgrupo
-                </label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-[11px] font-semibold text-slate-700">
+                    Nível 2 · Subgrupo / Família *
+                  </label>
+                  <span className="text-[10px] font-mono text-slate-400">
+                    {niveis2Options.length} subgrupos
+                  </span>
+                </div>
                 <select
-                  value={selectedSubgroupId}
-                  onChange={(e) => handleSubgroupChange(e.target.value)}
+                  value={selectedNivel2}
+                  onChange={(e) => handleNivel2Change(e.target.value)}
                   className="w-full text-xs bg-white border border-slate-200 rounded-xl px-3 py-2 text-slate-900 focus:outline-none focus:border-emerald-600 focus:ring-2 focus:ring-emerald-100 font-semibold shadow-2xs"
                 >
-                  {activeGroup.subgroups.map((sub) => (
-                    <option key={sub.id} value={sub.id}>
-                      {sub.code} - {sub.name}
+                  {niveis2Options.map((n2) => (
+                    <option key={n2} value={n2}>
+                      {n2}
                     </option>
                   ))}
                 </select>
               </div>
 
-              {/* Subgrupo Específico */}
+              {/* Nível 3 */}
               <div>
-                <label className="block text-[11px] font-semibold text-slate-600 mb-1">
-                  Nível 3 · Família / Subgrupo Específico
-                </label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-[11px] font-semibold text-slate-700">
+                    Nível 3 · Subgrupo Específico *
+                  </label>
+                  <span className="text-[10px] font-mono text-slate-400">
+                    {niveis3Options.length} opções
+                  </span>
+                </div>
                 <select
-                  value={selectedSpecificSubgroupId}
-                  onChange={(e) => handleSpecificSubgroupChange(e.target.value)}
+                  value={selectedNivel3}
+                  onChange={(e) => handleNivel3Change(e.target.value)}
                   className="w-full text-xs bg-white border border-slate-200 rounded-xl px-3 py-2 text-slate-900 focus:outline-none focus:border-emerald-600 focus:ring-2 focus:ring-emerald-100 font-semibold shadow-2xs"
                 >
-                  {activeSubgroup.specificSubgroups.map((spec) => (
-                    <option key={spec.id} value={spec.id}>
-                      {spec.code} - {spec.name}
+                  {niveis3Options.map((n3) => (
+                    <option key={n3} value={n3}>
+                      {n3}
                     </option>
                   ))}
                 </select>
@@ -380,7 +555,7 @@ export const PDMBuilderModal: React.FC<PDMBuilderModalProps> = ({
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
-              {activeSpecificSubgroup.attributeDefinitions.map((attrDef) => (
+              {activeSpecificSubgroup.attributeDefinitions.map((attrDef: AttributeDefinition) => (
                 <div key={attrDef.id} className="space-y-1">
                   <label className="block text-[11px] font-semibold text-slate-700">
                     {attrDef.label}
@@ -399,7 +574,7 @@ export const PDMBuilderModal: React.FC<PDMBuilderModalProps> = ({
                       className="w-full text-xs bg-white border border-slate-200 rounded-xl px-3 py-2 text-slate-900 focus:outline-none focus:border-emerald-600 focus:ring-2 focus:ring-emerald-100 font-medium shadow-2xs"
                     >
                       <option value="">Selecione...</option>
-                      {attrDef.options?.map((opt) => (
+                      {attrDef.options?.map((opt: string) => (
                         <option key={opt} value={opt}>
                           {opt}
                         </option>
@@ -666,6 +841,157 @@ export const PDMBuilderModal: React.FC<PDMBuilderModalProps> = ({
                   <span className="text-[10px] text-slate-500 font-normal">Dourado (10) & Paraná (14)</span>
                 </button>
               </div>
+            </div>
+          </div>
+
+          {/* 3.6. ORÇAMENTO & PROPOSTA COMERCIAL DO FORNECEDOR (OBRIGATÓRIO) */}
+          <div className="p-4 rounded-xl bg-blue-50/50 border-2 border-blue-200 space-y-3.5 shadow-2xs">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div className="text-xs font-mono font-bold uppercase tracking-wider text-blue-950 flex items-center gap-2">
+                <DollarSign className="w-4 h-4 text-blue-700" />
+                <span>3.6. Orçamento & Proposta Comercial (Obrigatório Conforme Governança)</span>
+              </div>
+              <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-blue-100 text-blue-800 border border-blue-300 w-fit">
+                Anexo & Alçadas por Valor
+              </span>
+            </div>
+
+            {/* ALÇADAS DE APROVAÇÃO BANNER */}
+            <div className="p-3 rounded-xl bg-white border border-blue-200 space-y-2">
+              <div className="flex items-center justify-between text-xs">
+                <span className="font-bold text-slate-800">
+                  Matriz Corporativa de Alçadas de Aprovação PDM:
+                </span>
+                <span className="text-[11px] font-mono font-bold text-blue-900">
+                  {Number(quoteValueInput) > 10000 ? (
+                    <span className="text-purple-700 bg-purple-50 px-2 py-0.5 rounded border border-purple-200">
+                      Requer Aprovação Nível 1 + Nível 2 + Nível 3
+                    </span>
+                  ) : Number(quoteValueInput) > 1000 ? (
+                    <span className="text-blue-700 bg-blue-50 px-2 py-0.5 rounded border border-blue-200">
+                      Requer Aprovação Nível 1 + Nível 2
+                    </span>
+                  ) : (
+                    <span className="text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+                      Requer Aprovação Nível 1 (até R$ 1.000,00)
+                    </span>
+                  )}
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-[11px] font-mono">
+                <div className={`p-2 rounded-lg border ${
+                  Number(quoteValueInput) <= 1000 ? 'bg-emerald-50 border-emerald-300 font-bold text-emerald-950 ring-1 ring-emerald-300' : 'bg-slate-50 border-slate-200 text-slate-600'
+                }`}>
+                  <span className="block text-[10px] text-slate-500 uppercase font-sans">Alçada 1</span>
+                  <span>Até R$ 1.000,00</span>
+                  <span className="block text-[10px] font-sans font-normal text-slate-500">Aprovador Nível 1</span>
+                </div>
+
+                <div className={`p-2 rounded-lg border ${
+                  Number(quoteValueInput) > 1000 && Number(quoteValueInput) <= 10000 ? 'bg-blue-50 border-blue-300 font-bold text-blue-950 ring-1 ring-blue-300' : 'bg-slate-50 border-slate-200 text-slate-600'
+                }`}>
+                  <span className="block text-[10px] text-slate-500 uppercase font-sans">Alçada 2</span>
+                  <span>R$ 1.000,01 a R$ 10.000,00</span>
+                  <span className="block text-[10px] font-sans font-normal text-slate-500">Nível 1 + Nível 2</span>
+                </div>
+
+                <div className={`p-2 rounded-lg border ${
+                  Number(quoteValueInput) > 10000 ? 'bg-purple-50 border-purple-300 font-bold text-purple-950 ring-1 ring-purple-300' : 'bg-slate-50 border-slate-200 text-slate-600'
+                }`}>
+                  <span className="block text-[10px] text-slate-500 uppercase font-sans">Alçada 3</span>
+                  <span>Acima de R$ 10.000,00</span>
+                  <span className="block text-[10px] font-sans font-normal text-slate-500">Nível 1 + Nível 2 + Nível 3</span>
+                </div>
+              </div>
+            </div>
+
+            {/* INPUTS DE ORÇAMENTO */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div>
+                <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+                  Fornecedor Cotado <span className="text-rose-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  required
+                  placeholder="Ex: SKF do Brasil, NSK, SEW-Eurodrive..."
+                  value={supplierNameInput}
+                  onChange={(e) => setSupplierNameInput(e.target.value)}
+                  className="w-full text-xs bg-white border border-blue-200 rounded-xl px-3 py-2 text-slate-900 font-medium focus:outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-100 shadow-2xs"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+                  Nº do Orçamento / Cotação <span className="text-rose-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  required
+                  placeholder="Ex: COT-2026-0849 ou PROP-7819"
+                  value={quoteNumberInput}
+                  onChange={(e) => setQuoteNumberInput(e.target.value)}
+                  className="w-full text-xs bg-white border border-blue-200 rounded-xl px-3 py-2 text-slate-900 font-mono font-medium focus:outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-100 shadow-2xs"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+                  Valor Estimado Unitário (R$) <span className="text-rose-500">*</span>
+                </label>
+                <div className="relative">
+                  <span className="absolute left-3 top-2 text-xs font-mono font-bold text-slate-500">
+                    R$
+                  </span>
+                  <input
+                    type="number"
+                    min={0.01}
+                    step={0.01}
+                    required
+                    placeholder="0,00"
+                    value={quoteValueInput}
+                    onChange={(e) => setQuoteValueInput(e.target.value === '' ? '' : Number(e.target.value))}
+                    className="w-full text-xs bg-white border border-blue-200 rounded-xl pl-9 pr-3 py-2 text-slate-900 font-mono font-bold focus:outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-100 shadow-2xs"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* ANEXO DO ARQUIVO DE ORÇAMENTO (PDF) */}
+            <div className="p-3 rounded-xl bg-white border border-blue-200 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-lg bg-rose-50 text-rose-700 border border-rose-200 flex items-center justify-center shrink-0">
+                  <FileText className="w-5 h-5 text-rose-600" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <strong className="text-xs font-bold text-slate-900 font-mono">
+                      {quoteFileName || 'Nenhum orçamento anexado'}
+                    </strong>
+                    <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-emerald-100 text-emerald-800 font-bold">
+                      PDF Válido
+                    </span>
+                  </div>
+                  <p className="text-[10px] text-slate-500">
+                    Proposta formal do fornecedor anexada com validade de preços e tributos.
+                  </p>
+                </div>
+              </div>
+
+              <label className="cursor-pointer px-3 py-1.5 rounded-xl bg-blue-50 hover:bg-blue-100 text-blue-900 border border-blue-200 text-xs font-bold transition-colors shadow-2xs flex items-center gap-1.5 shrink-0">
+                <Paperclip className="w-3.5 h-3.5 text-blue-700" />
+                <span>Alterar Arquivo PDF</span>
+                <input
+                  type="file"
+                  accept=".pdf,.doc,.docx"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) setQuoteFileName(file.name);
+                  }}
+                  className="hidden"
+                />
+              </label>
             </div>
           </div>
 
