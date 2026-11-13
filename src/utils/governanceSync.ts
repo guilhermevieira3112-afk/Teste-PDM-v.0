@@ -213,6 +213,7 @@ export async function fetchRemoteGovernanceState(
       : '/api/governance/state';
     const res = await fetch(url, {
       method: 'GET',
+      credentials: 'include',
       headers: { Accept: 'application/json' },
     });
     if (!res.ok) return null;
@@ -229,11 +230,41 @@ export async function pushRemoteGovernanceState(
   try {
     const res = await fetch('/api/governance/state', {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ state, updatedBy }),
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify({
+        state,
+        baseVersion: state.version,
+        updatedBy,
+      }),
     });
-    if (!res.ok) return null;
-    return (await res.json()) as GovernanceStateResponse;
+    const data = (await res.json().catch(() => null)) as
+      | (GovernanceStateResponse & {
+          details?: { serverState?: SiteGovernanceDelta };
+        })
+      | null;
+
+    if (res.status === 409 && data) {
+      return {
+        state: data.details?.serverState || null,
+        sharePoint: data.sharePoint || {
+          writeConfigured: false,
+          readConfigured: false,
+          emailConfigured: false,
+          lastSyncAt: new Date().toISOString(),
+          lastSyncStatus: 'ERROR',
+          lastSyncMessage: data.error || 'Conflito de versão detectado.',
+        },
+        conflict: true,
+        error: data.error,
+        code: data.code || 'VERSION_CONFLICT',
+      };
+    }
+
+    if (!res.ok) {
+      return null;
+    }
+    return data;
   } catch {
     return null;
   }
@@ -246,11 +277,19 @@ export async function triggerManualSharePointSync(
   try {
     const res = await fetch('/api/governance/sync', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ state, updatedBy }),
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify({
+        state,
+        baseVersion: state?.version,
+        updatedBy,
+      }),
     });
-    if (!res.ok) return null;
-    return (await res.json()) as GovernanceStateResponse;
+    const data = (await res.json().catch(() => null)) as GovernanceStateResponse | null;
+    if (!res.ok) {
+      return data;
+    }
+    return data;
   } catch {
     return null;
   }
@@ -268,14 +307,51 @@ export async function sendPowerAutomateApprovalEmail(payload: {
   try {
     const res = await fetch('/api/governance/notify-email', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
       body: JSON.stringify(payload),
     });
+    const data = (await res.json().catch(() => null)) as
+      | { sentViaPowerAutomate?: boolean; message?: string; error?: string }
+      | null;
     if (!res.ok) {
-      return { sentViaPowerAutomate: false };
+      return {
+        sentViaPowerAutomate: false,
+        message: data?.message || data?.error || `HTTP ${res.status}`,
+      };
     }
-    return (await res.json()) as { sentViaPowerAutomate: boolean; message?: string };
+    return {
+      sentViaPowerAutomate: Boolean(data?.sentViaPowerAutomate),
+      message: data?.message,
+    };
   } catch {
     return { sentViaPowerAutomate: false };
+  }
+}
+
+export async function uploadGovernanceFile(params: {
+  file: File;
+  category: 'items' | 'quotations';
+  itemId: string;
+}): Promise<{ key: string; url: string; fileName: string; contentType: string; size: number } | null> {
+  try {
+    const formData = new FormData();
+    formData.append('file', params.file);
+    formData.append('category', params.category);
+    formData.append('itemId', params.itemId);
+
+    const res = await fetch('/api/files/upload', {
+      method: 'POST',
+      credentials: 'include',
+      body: formData,
+    });
+    if (!res.ok) return null;
+    const data = (await res.json()) as {
+      ok?: boolean;
+      file?: { key: string; url: string; fileName: string; contentType: string; size: number };
+    };
+    return data.file || null;
+  } catch {
+    return null;
   }
 }

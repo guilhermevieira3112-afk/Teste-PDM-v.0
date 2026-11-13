@@ -1,0 +1,16 @@
+# Variáveis locais para desenvolvimento com Wrangler / @cloudflare/vite-plugin.
+# NUNCA commitar .dev.vars com valores reais. Em produção use: npx wrangler secret put <NOME>
+
+APP_ENV="development"
+
+# Apenas para testes locais controlados durante a Etapa 1 (antes da Etapa 3 implementar /api/auth/*).
+# Mantenha "false" para testar bloqueio 401/403; use "true" apenas em desenvolvimento local se necessário.
+STAGE1_DEV_BYPASS="false"
+
+# URLs dos gatilhos HTTP do Power Automate (configurar via Cloudflare Secrets em produção)
+POWER_AUTOMATE_WRITE_URL=""
+POWER_AUTOMATE_READ_URL=""
+POWER_AUTOMATE_EMAIL_URL=""
+
+# Segredo HMAC para assinatura de sessões na Etapa 3
+AUTH_SESSION_SECRET=""

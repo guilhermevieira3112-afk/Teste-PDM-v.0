@@ -65,4 +65,8 @@ export interface SharePointIntegrationStatus {
 export interface GovernanceStateResponse {
   state: SiteGovernanceDelta | null;
   sharePoint: SharePointIntegrationStatus;
+  conflict?: boolean;
+  mergedConcurrently?: boolean;
+  error?: string;
+  code?: string;
 }
