@@ -1,7 +1,4 @@
 import { ApiHttpError, Env } from './types.ts';
-import { D1GovernanceAdapter } from './storage/d1Adapter.ts';
-import { R2MediaAdapter } from './storage/r2Adapter.ts';
-import { GovernanceStore, MediaStorage } from './storage/contracts.ts';
 import {
   createPowerAutomateClient,
   PowerAutomateClient,
@@ -11,8 +8,6 @@ import { handleFilesRoute } from './routes/files.ts';
 import { errorResponse, jsonResponse } from './utils/http.ts';
 
 export interface WorkerDependencies {
-  store?: GovernanceStore;
-  mediaStorage?: MediaStorage;
   powerAutomate?: PowerAutomateClient;
 }
 
@@ -25,14 +20,12 @@ export async function handleWorkerRequest(
 
   try {
     if (url.pathname.startsWith('/api/governance/')) {
-      const store = deps?.store ?? new D1GovernanceAdapter(env.DB);
       const powerAutomate = deps?.powerAutomate ?? createPowerAutomateClient(env);
-      return await handleGovernanceRoute(request, url, env, { store, powerAutomate });
+      return await handleGovernanceRoute(request, url, env, { powerAutomate });
     }
 
     if (url.pathname === '/api/files' || url.pathname.startsWith('/api/files/')) {
-      const mediaStorage = deps?.mediaStorage ?? new R2MediaAdapter(env.MEDIA_BUCKET);
-      return await handleFilesRoute(request, url, env, mediaStorage);
+      return await handleFilesRoute(request, url, env);
     }
 
     if (url.pathname.startsWith('/api/')) {

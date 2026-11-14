@@ -7,8 +7,6 @@ import type { UserProfileRole } from '../src/types/auth.ts';
 export type GovernanceRole = UserProfileRole | 'UNIT_MANAGER';
 
 export interface Env {
-  DB?: D1Database;
-  MEDIA_BUCKET?: R2Bucket;
   ASSETS?: Fetcher;
   POWER_AUTOMATE_WRITE_URL?: string;
   POWER_AUTOMATE_READ_URL?: string;
@@ -32,9 +30,7 @@ export interface AuthenticatedContext {
 export type ApiErrorCode =
   | 'UNAUTHENTICATED'
   | 'FORBIDDEN'
-  | 'D1_NOT_BOUND'
-  | 'D1_SCHEMA_NOT_INITIALIZED'
-  | 'R2_NOT_BOUND'
+  | 'STORAGE_DISABLED'
   | 'VERSION_CONFLICT'
   | 'VALIDATION_ERROR'
   | 'NOT_FOUND'
@@ -63,24 +59,11 @@ export class ApiHttpError extends Error {
   }
 }
 
-export interface D1HealthInfo {
-  bound: boolean;
-  connected: boolean;
-  schemaReady: boolean;
-  currentVersion: number | null;
-  lastUpdatedAt: string | null;
-  missingTables?: string[];
-  counts?: {
-    users: number;
-    history: number;
-    syncLogs: number;
-  };
+export interface StorageHealthInfo {
+  mode: 'CLIENT_LOCAL_ONLY';
+  d1Enabled: false;
+  r2Enabled: false;
   message: string;
-}
-
-export interface R2HealthInfo {
-  bound: boolean;
-  bucketName: string;
 }
 
 export interface GovernanceHealthResponse {
@@ -88,14 +71,12 @@ export interface GovernanceHealthResponse {
   runtime: 'cloudflare-workers';
   environment: string;
   timestamp: string;
-  version: number | null;
   auth: {
     protected: boolean;
     stage: 'STAGE_1_GUARD_READY' | 'STAGE_3_FULL_AUTH';
     devBypassActive: boolean;
   };
-  d1: D1HealthInfo;
-  r2: R2HealthInfo;
+  storage: StorageHealthInfo;
   sharePoint: SharePointIntegrationStatus & {
     listName: string;
     masterRecordId: number;
@@ -105,22 +86,6 @@ export interface GovernanceHealthResponse {
     readConfigured: boolean;
     emailConfigured: boolean;
   };
-}
-
-export interface GovernanceStateRow {
-  id: number;
-  version: number;
-  updated_at: string;
-  updated_by: string | null;
-  delta_json: string;
-}
-
-export interface GovernanceSyncLogEntry {
-  version: number;
-  destination: 'SHAREPOINT_POWER_AUTOMATE';
-  status: 'SYNCED' | 'LOCAL_ONLY' | 'ERROR';
-  message: string;
-  createdAt: string;
 }
 
 export interface SaveGovernanceStateInput {
@@ -134,14 +99,4 @@ export interface SaveGovernanceStateResult {
   state: SiteGovernanceDelta;
   mergedConcurrently: boolean;
   mergedFields: string[];
-}
-
-export interface MediaAttachmentRef {
-  key: string;
-  url: string;
-  fileName: string;
-  contentType: string;
-  size: number;
-  uploadedAt: string;
-  uploadedBy: string;
 }

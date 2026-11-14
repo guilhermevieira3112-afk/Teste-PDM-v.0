@@ -8,7 +8,7 @@ import {
   GovernanceHealthResponse,
 } from '../types.ts';
 import {
-  GovernanceStore,
+  mergeConcurrentDeltas,
   sanitizeDeltaForStorage,
   validateIncomingDelta,
 } from '../storage/contracts.ts';
@@ -20,7 +20,6 @@ import { PowerAutomateClient } from '../integrations/powerAutomateClient.ts';
 import { jsonResponse, parseJsonBody } from '../utils/http.ts';
 
 export interface GovernanceRouteDeps {
-  store: GovernanceStore;
   powerAutomate: PowerAutomateClient;
 }
 
@@ -56,24 +55,24 @@ export async function handleGovernanceRoute(
       throw new ApiHttpError(405, 'METHOD_NOT_ALLOWED', 'Use GET para /api/governance/health.');
     }
 
-    const d1Health = await deps.store.getHealthInfo();
     const sharePointConfigured = flags.writeConfigured && flags.readConfigured;
 
     const payload: GovernanceHealthResponse = {
-      ok: d1Health.bound && d1Health.connected,
+      ok: true,
       runtime: 'cloudflare-workers',
       environment: env.APP_ENV || 'production',
       timestamp: new Date().toISOString(),
-      version: d1Health.currentVersion,
       auth: {
         protected: !isStage1DevBypassActive(env),
         stage: 'STAGE_1_GUARD_READY',
         devBypassActive: isStage1DevBypassActive(env),
       },
-      d1: d1Health,
-      r2: {
-        bound: Boolean(env.MEDIA_BUCKET),
-        bucketName: 'pdm-governance-media',
+      storage: {
+        mode: 'CLIENT_LOCAL_ONLY',
+        d1Enabled: false,
+        r2Enabled: false,
+        message:
+          'Persistência D1 e armazenamento R2 desativados temporariamente; operando em modo local no navegador.',
       },
       sharePoint: {
         ...buildSharePointStatus(
@@ -81,8 +80,8 @@ export async function handleGovernanceRoute(
           sharePointConfigured ? 'IDLE' : 'LOCAL_ONLY',
           sharePointConfigured
             ? 'Power Automate configurado para leitura e gravação no SharePoint.'
-            : 'SharePoint/Power Automate ainda não configurado nos Secrets do Worker.',
-          d1Health.lastUpdatedAt
+            : 'SharePoint/Power Automate não configurado; operando apenas em modo local.',
+          null
         ),
         listName: 'PDM_Governanca_Delta',
         masterRecordId: 1,
@@ -96,17 +95,15 @@ export async function handleGovernanceRoute(
   // Rota 2 — Consultar estado da governança (GET /api/governance/state)
   if (pathname === '/api/governance/state') {
     if (method === 'GET') {
-      const auth = await requireGovernanceAccess(request, env);
+      await requireGovernanceAccess(request, env);
       const refreshFromSharePoint = url.searchParams.get('refresh') === '1';
 
-      let currentState = await deps.store.getState();
+      let currentState: SiteGovernanceDelta | null = null;
       let sharePointStatus = buildSharePointStatus(
         flags,
         flags.writeConfigured ? 'IDLE' : 'LOCAL_ONLY',
-        currentState
-          ? `Estado v${currentState.version} carregado do Cloudflare D1.`
-          : 'D1 conectado, sem estado de governança gravado ainda.',
-        currentState?.updatedAt ?? null
+        'Operando sem banco D1 (desativado temporariamente); estado mantido localmente no navegador.',
+        null
       );
 
       if (refreshFromSharePoint) {
@@ -114,35 +111,17 @@ export async function handleGovernanceRoute(
           sharePointStatus = buildSharePointStatus(
             flags,
             'LOCAL_ONLY',
-            'POWER_AUTOMATE_READ_URL não configurada; retornando versão do D1.'
+            'POWER_AUTOMATE_READ_URL não configurada; utilizando estado local do navegador.'
           );
         } else {
           const readRes = await deps.powerAutomate.readLatestDelta();
           if (readRes.status === 'SYNCED' && readRes.remoteDelta) {
-            const remoteVersion = Number(readRes.remoteDelta.version || 0);
-            const localVersion = Number(currentState?.version || 0);
-
-            // Nunca sobrescrever versão mais recente já presente no D1
-            if (remoteVersion > localVersion) {
-              const saved = await deps.store.saveStateWithConcurrency({
-                incomingState: sanitizeDeltaForStorage(readRes.remoteDelta),
-                baseVersion: localVersion,
-                updatedBy: readRes.remoteDelta.updatedBy || auth.name,
-                operation: 'SHAREPOINT_REFRESH',
-              });
-              currentState = saved.state;
-              sharePointStatus = buildSharePointStatus(
-                flags,
-                'SYNCED',
-                `Estado atualizado a partir do SharePoint (v${saved.state.version}).`
-              );
-            } else {
-              sharePointStatus = buildSharePointStatus(
-                flags,
-                'SYNCED',
-                `D1 já possui a versão mais recente (v${localVersion}; SharePoint v${remoteVersion}).`
-              );
-            }
+            currentState = sanitizeDeltaForStorage(readRes.remoteDelta);
+            sharePointStatus = buildSharePointStatus(
+              flags,
+              'SYNCED',
+              `Estado carregado do SharePoint (v${currentState.version}).`
+            );
           } else {
             sharePointStatus = buildSharePointStatus(flags, readRes.status, readRes.message);
           }
@@ -175,31 +154,26 @@ export async function handleGovernanceRoute(
           ? body.baseVersion
           : validatedDelta.version;
 
-      const saveResult = await deps.store.saveStateWithConcurrency({
-        incomingState: validatedDelta,
-        baseVersion,
+      const nextState: SiteGovernanceDelta = {
+        ...validatedDelta,
+        version: Math.max(1, Math.floor(baseVersion) + 1),
+        updatedAt: new Date().toISOString(),
         updatedBy,
-        operation: 'PUT_STATE',
-      });
+      };
 
-      const writeRes = await deps.powerAutomate.writeDelta(saveResult.state, updatedBy);
-
-      await Promise.all([
-        deps.store.updateHistorySyncStatus(saveResult.state.version, writeRes.status),
-        deps.store.recordSyncLog({
-          version: saveResult.state.version,
-          destination: 'SHAREPOINT_POWER_AUTOMATE',
-          status: writeRes.status,
-          message: writeRes.message,
-          createdAt: new Date().toISOString(),
-        }),
-      ]);
+      const writeRes = await deps.powerAutomate.writeDelta(nextState, updatedBy);
 
       return jsonResponse({
-        state: saveResult.state,
-        mergedConcurrently: saveResult.mergedConcurrently,
-        mergedFields: saveResult.mergedFields,
-        sharePoint: buildSharePointStatus(flags, writeRes.status, writeRes.message),
+        state: nextState,
+        mergedConcurrently: false,
+        mergedFields: [],
+        sharePoint: buildSharePointStatus(
+          flags,
+          writeRes.status,
+          flags.writeConfigured
+            ? writeRes.message
+            : 'Alterações validadas e mantidas localmente no navegador (D1 desativado temporariamente).'
+        ),
       });
     }
 
@@ -228,88 +202,68 @@ export async function handleGovernanceRoute(
       auth.name ||
       auth.username;
 
-    let d1State = await deps.store.getState();
-    let hasChangesApplied = false;
+    let stateToSync: SiteGovernanceDelta | null =
+      body.state !== undefined ? validateIncomingDelta(body.state) : null;
 
-    if (body.state !== undefined) {
-      const validatedIncoming = validateIncomingDelta(body.state);
-      const localVersion = Number(d1State?.version || 0);
-      const incomingBaseVersion =
-        typeof body.baseVersion === 'number' ? body.baseVersion : validatedIncoming.version;
-
-      const serializedCurrent = d1State ? JSON.stringify({ ...d1State, updatedAt: '' }) : '';
-      const serializedIncoming = JSON.stringify({
-        ...validatedIncoming,
-        version: d1State?.version || validatedIncoming.version,
-        updatedAt: '',
-      });
-
-      if (!d1State || serializedCurrent !== serializedIncoming || incomingBaseVersion !== localVersion) {
-        const saved = await deps.store.saveStateWithConcurrency({
-          incomingState: validatedIncoming,
-          baseVersion: incomingBaseVersion,
-          updatedBy,
-          operation: 'MANUAL_SYNC',
-        });
-        d1State = saved.state;
-        hasChangesApplied = true;
-      }
-    }
-
-    if (!d1State) {
+    if (!stateToSync && !flags.readConfigured) {
       throw new ApiHttpError(
         400,
         'VALIDATION_ERROR',
-        'Nenhum estado de governança encontrado no D1 ou enviado na requisição para sincronizar.'
+        'Envie o campo "state" na requisição para sincronizar enquanto o D1 estiver desativado.'
       );
     }
 
-    let stateToSync: SiteGovernanceDelta = d1State;
-
-    // Consultar SharePoint se leitura estiver configurada (sem regredir D1)
     if (flags.readConfigured) {
       const readRes = await deps.powerAutomate.readLatestDelta();
       if (readRes.status === 'SYNCED' && readRes.remoteDelta) {
-        const remoteVersion = Number(readRes.remoteDelta.version || 0);
-        if (remoteVersion > stateToSync.version) {
-          const merged = await deps.store.saveStateWithConcurrency({
-            incomingState: sanitizeDeltaForStorage(readRes.remoteDelta),
-            baseVersion: stateToSync.version,
-            updatedBy: readRes.remoteDelta.updatedBy || updatedBy,
-            operation: 'SHAREPOINT_REFRESH',
-          });
-          stateToSync = merged.state;
-          hasChangesApplied = true;
+        const sanitizedRemote = sanitizeDeltaForStorage(readRes.remoteDelta);
+        if (!stateToSync) {
+          stateToSync = sanitizedRemote;
+        } else if (Number(sanitizedRemote.version || 0) > Number(stateToSync.version || 0)) {
+          const merged = mergeConcurrentDeltas(sanitizedRemote, stateToSync);
+          stateToSync = {
+            ...merged.merged,
+            version: Math.max(sanitizedRemote.version, stateToSync.version) + 1,
+            updatedBy,
+          };
         }
       }
     }
 
-    const writeRes = await deps.powerAutomate.writeDelta(stateToSync, updatedBy);
+    if (!stateToSync) {
+      throw new ApiHttpError(
+        400,
+        'VALIDATION_ERROR',
+        'Nenhum estado de governança disponível para sincronizar.'
+      );
+    }
+
     const now = new Date().toISOString();
+    const preparedState: SiteGovernanceDelta = {
+      ...stateToSync,
+      version: Math.max(1, Number(stateToSync.version || 0)),
+      updatedAt: now,
+      updatedBy,
+    };
 
-    await Promise.all([
-      deps.store.updateHistorySyncStatus(stateToSync.version, writeRes.status),
-      deps.store.recordSyncLog({
-        version: stateToSync.version,
-        destination: 'SHAREPOINT_POWER_AUTOMATE',
-        status: writeRes.status,
-        message: writeRes.message,
-        createdAt: now,
-      }),
-    ]);
+    const writeRes = await deps.powerAutomate.writeDelta(preparedState, updatedBy);
+    const sharePointStatus = buildSharePointStatus(
+      flags,
+      writeRes.status,
+      flags.writeConfigured
+        ? writeRes.message
+        : 'Estado salvo localmente no navegador (D1 e SharePoint desativados).',
+      now
+    );
 
-    const sharePointStatus = buildSharePointStatus(flags, writeRes.status, writeRes.message, now);
-
-    // Nunca reportar sincronização concluída se houve apenas gravação local ou falha externa
     const responseStatus = writeRes.status === 'ERROR' ? 502 : 200;
     return jsonResponse(
       {
         synced: writeRes.status === 'SYNCED',
         localPersisted: true,
-        changesAppliedToD1: hasChangesApplied,
-        version: stateToSync.version,
+        version: preparedState.version,
         syncedAt: now,
-        state: stateToSync,
+        state: preparedState,
         sharePoint: sharePointStatus,
       },
       responseStatus

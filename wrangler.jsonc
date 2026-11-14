@@ -14,20 +14,6 @@
   "build": {
     "command": "npm run build"
   },
-  "d1_databases": [
-    {
-      "binding": "DB",
-      "database_name": "pdm-governance-db",
-      "database_id": "00000000-0000-0000-0000-000000000000",
-      "migrations_dir": "migrations"
-    }
-  ],
-  "r2_buckets": [
-    {
-      "binding": "MEDIA_BUCKET",
-      "bucket_name": "pdm-governance-media"
-    }
-  ],
   "vars": {
     "APP_ENV": "production",
     "POWER_AUTOMATE_TIMEOUT_MS": "10000"

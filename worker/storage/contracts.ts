@@ -4,43 +4,11 @@ import type {
 } from '../../src/types/governanceSync.ts';
 import type { UserAccount } from '../../src/types/auth.ts';
 import type { PDMItem, StockMovement } from '../../src/types/pdm.ts';
-import {
-  ApiHttpError,
-  D1HealthInfo,
-  GovernanceSyncLogEntry,
-  MediaAttachmentRef,
-  SaveGovernanceStateInput,
-  SaveGovernanceStateResult,
-} from '../types.ts';
-
-export interface GovernanceStore {
-  getHealthInfo(): Promise<D1HealthInfo>;
-  getState(): Promise<SiteGovernanceDelta | null>;
-  saveStateWithConcurrency(input: SaveGovernanceStateInput): Promise<SaveGovernanceStateResult>;
-  updateHistorySyncStatus(version: number, syncStatus: 'SYNCED' | 'LOCAL_ONLY' | 'ERROR'): Promise<void>;
-  recordSyncLog(entry: GovernanceSyncLogEntry): Promise<void>;
-}
-
-export interface MediaStorage {
-  putMedia(params: {
-    key: string;
-    data: ArrayBuffer;
-    contentType: string;
-    fileName: string;
-    uploadedBy: string;
-  }): Promise<MediaAttachmentRef>;
-  getMedia(key: string): Promise<{
-    body: ReadableStream<Uint8Array> | ArrayBuffer;
-    contentType: string;
-    size: number;
-    etag: string;
-  } | null>;
-  deleteMedia(key: string): Promise<void>;
-}
+import { ApiHttpError } from '../types.ts';
 
 /**
  * Remove credenciais, hashes e segredos TOTP/sessão do pacote delta
- * para nunca persistir em delta_json ou enviar ao SharePoint.
+ * para nunca persistir em payload ou enviar ao SharePoint.
  */
 export function sanitizeDeltaForStorage(delta: SiteGovernanceDelta): SiteGovernanceDelta {
   const sanitizedUsers: UserAccount[] = (delta.users || []).map((user) => {
@@ -155,10 +123,7 @@ function mergeById<T extends { id: string }>(
 }
 
 /**
- * Resolve atualizações concorrentes quando baseVersion < currentVersion:
- * - Se alterações ocorreram em registros independentes (ex.: Unidade A alterou Item 1
- *   e Unidade B alterou Item 2), realiza merge preservando ambos.
- * - Se duas unidades alteraram o mesmo item/usuário simultaneamente, dispara 409 CONFLICT.
+ * Resolve atualizações concorrentes quando há divergência de versões entre unidades.
  */
 export function mergeConcurrentDeltas(
   current: SiteGovernanceDelta,
@@ -167,7 +132,6 @@ export function mergeConcurrentDeltas(
   const conflicts: string[] = [];
   const mergedFields: string[] = [];
 
-  // 1. Merge de overrides de itens TOTVS por itemId
   const mergedOverrides: Record<string, ItemGovernanceOverride> = {
     ...(current.itemOverrides || {}),
   };
@@ -182,11 +146,9 @@ export function mergeConcurrentDeltas(
     if (stableJson(existingOv) === stableJson(incomingOv)) {
       continue;
     }
-    // Mesmo item alterado na versão atual e na versão recebida -> conflito explícito
     conflicts.push(`itemOverrides:${itemId}`);
   }
 
-  // 2. Merge de novos itens PDM criados no portal
   const mergedCustomItems: PDMItem[] = mergeById(
     current.customPdmItems || [],
     incoming.customPdmItems || [],
@@ -197,7 +159,6 @@ export function mergeConcurrentDeltas(
     mergedFields.push('customPdmItems');
   }
 
-  // 3. Merge de usuários (sem senhas/segredos)
   const mergedUsers: UserAccount[] = mergeById(
     current.users || [],
     incoming.users || [],
@@ -208,7 +169,6 @@ export function mergeConcurrentDeltas(
     mergedFields.push('users');
   }
 
-  // 4. Merge de movimentações por id
   const currentMovesMap = new Map((current.movements || []).map((m) => [m.id, m]));
   for (const move of incoming.movements || []) {
     if (!currentMovesMap.has(move.id)) {
@@ -218,7 +178,6 @@ export function mergeConcurrentDeltas(
   }
   const mergedMovements: StockMovement[] = Array.from(currentMovesMap.values());
 
-  // 5. Níveis PDM e flag global 2FA
   let mergedPdmLevels = current.pdmLevels || [];
   if (stableJson(current.pdmLevels) !== stableJson(incoming.pdmLevels)) {
     if ((incoming.pdmLevels?.length || 0) > (current.pdmLevels?.length || 0)) {

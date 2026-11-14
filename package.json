@@ -9,8 +9,6 @@
     "build": "vite build",
     "preview": "vite preview --port 3000 --host 0.0.0.0",
     "deploy": "vite build && wrangler deploy",
-    "db:migrate:local": "wrangler d1 migrations apply pdm-governance-db --local",
-    "db:migrate:remote": "wrangler d1 migrations apply pdm-governance-db --remote",
     "clean": "rm -rf dist .wrangler/tmp",
     "test": "vitest run",
     "lint": "tsc --noEmit && tsc -p tsconfig.worker.json --noEmit && tsc -p tsconfig.tests.json --noEmit"
