@@ -19,7 +19,6 @@ import {
   Unlock, 
   Plus, 
   RefreshCw,
-  Sparkles,
   Info,
   ExternalLink,
   ShieldAlert,
@@ -28,7 +27,7 @@ import {
   Link2,
   Cloud
 } from 'lucide-react';
-import { UserAccount, UserStatus, UserProfileRole } from '../../types/auth';
+import { UserAccount, UserStatus, UserProfileRole, GovernanceQueueAccess } from '../../types/auth';
 import { Tenant } from '../../types/pdm';
 import { TENANTS } from '../../data/taxonomy';
 import { 
@@ -89,6 +88,7 @@ export const UserControlView: React.FC<UserControlViewProps> = ({
   const [formRole, setFormRole] = useState<UserProfileRole>('ALMOXARIFADO');
   const [formTenantId, setFormTenantId] = useState('dourado-sp');
   const [formDepartment, setFormDepartment] = useState('Almoxarifado');
+  const [formGovernanceAccess, setFormGovernanceAccess] = useState<GovernanceQueueAccess>('VIEW');
   const [formEnable2FA] = useState(true);
 
   const isGlobalPdmMaster = currentUser.username.toLowerCase() === 'pdmindustrial.premierpet';
@@ -273,6 +273,7 @@ export const UserControlView: React.FC<UserControlViewProps> = ({
       profileTitle: PROFILE_LABELS[formRole] || 'Almoxarifado',
       tenantId: tenantObj.id,
       tenantName: tenantObj.name,
+      governanceQueueAccess: formRole === 'MASTER_ADMIN' ? 'EDIT' : formGovernanceAccess,
       department: formDepartment.trim() || 'Almoxarifado & Manutenção',
       status: 'ACTIVE',
       twoFactorEnabled: formEnable2FA,
@@ -293,6 +294,7 @@ export const UserControlView: React.FC<UserControlViewProps> = ({
     setFormUsername('');
     setFormEmail('');
     setFormPassword('');
+    setFormGovernanceAccess('VIEW');
   };
 
   // Save Edits to User
@@ -564,24 +566,25 @@ export const UserControlView: React.FC<UserControlViewProps> = ({
 
       {/* 4. DENSE USERS ERP TABLE */}
       <div className="rounded-2xl border border-slate-200 bg-white overflow-hidden shadow-xs">
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs border-collapse">
-            <thead>
-              <tr className="border-b border-slate-200 bg-slate-50/80 text-slate-500 font-mono text-[11px] uppercase tracking-wider">
-                <th className="py-3 px-4">Nome & Login Padrão</th>
-                <th className="py-3 px-4">E-mail Corporativo & Setor</th>
-                <th className="py-3 px-4">Perfil de Acesso</th>
+        <div className="overflow-auto max-h-[65vh]">
+          <table className="w-full text-center text-xs border-collapse">
+            <thead className="sticky top-0 z-20 bg-slate-50 shadow-[0_1px_0_0_#e2e8f0]">
+              <tr className="border-b border-slate-200 bg-slate-50 text-slate-500 font-mono text-[11px] uppercase tracking-wider">
+                <th className="py-3 px-4 text-center">Nome & Login Padrão</th>
+                <th className="py-3 px-4 text-center">E-mail Corporativo & Setor</th>
+                <th className="py-3 px-4 text-center">Perfil de Acesso</th>
                 <th className="py-3 px-4 text-center">Alçada de Aprovação PDM</th>
-                <th className="py-3 px-4">Unidade Padrão</th>
+                <th className="py-3 px-4 text-center">Acesso Fila de Governança</th>
+                <th className="py-3 px-4 text-center">Unidade Padrão</th>
                 <th className="py-3 px-4 text-center">Status</th>
-                <th className="py-3 px-4">Data / Homologação</th>
+                <th className="py-3 px-4 text-center">Data / Homologação</th>
                 <th className="py-3 px-4 text-center">Controle de Acesso</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 font-sans">
               {filteredUsers.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="py-12 text-center text-slate-400 text-xs">
+                  <td colSpan={9} className="py-12 text-center text-slate-400 text-xs">
                     Nenhum usuário localizado com os filtros aplicados.
                   </td>
                 </tr>
@@ -599,8 +602,8 @@ export const UserControlView: React.FC<UserControlViewProps> = ({
                       }`}
                     >
                       {/* USERNAME & LOGIN */}
-                      <td className="py-3.5 px-4 whitespace-nowrap">
-                        <div className="font-bold text-slate-900 text-xs flex items-center gap-1.5">
+                      <td className="py-3.5 px-4 whitespace-nowrap text-center">
+                        <div className="font-bold text-slate-900 text-xs flex items-center justify-center gap-1.5">
                           <span>{u.name}</span>
                           {u.twoFactorEnabled && (
                             <span className="text-[9px] font-mono text-emerald-800 bg-emerald-50 px-1 py-0.2 rounded border border-emerald-200" title="2FA Microsoft Authenticator Ativo">
@@ -608,7 +611,7 @@ export const UserControlView: React.FC<UserControlViewProps> = ({
                             </span>
                           )}
                         </div>
-                        <div className="text-[11px] font-mono font-bold text-emerald-800 mt-0.5 flex items-center gap-1">
+                        <div className="text-[11px] font-mono font-bold text-emerald-800 mt-0.5 flex items-center justify-center gap-1">
                           <span className="text-slate-400 font-normal">Login:</span>
                           <span className="bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200">
                             {u.username}
@@ -617,17 +620,17 @@ export const UserControlView: React.FC<UserControlViewProps> = ({
                       </td>
 
                       {/* EMAIL & DEPARTMENT */}
-                      <td className="py-3.5 px-4 max-w-xs">
-                        <div className="font-mono text-slate-700 text-xs truncate" title={u.email}>
+                      <td className="py-3.5 px-4 max-w-xs text-center">
+                        <div className="font-mono text-slate-700 text-xs truncate mx-auto" title={u.email}>
                           {u.email}
                         </div>
-                        <div className="text-[11px] text-slate-400 truncate mt-0.5">
+                        <div className="text-[11px] text-slate-400 truncate mx-auto mt-0.5">
                           {u.department || 'Operações Industriais'}
                         </div>
                       </td>
 
                       {/* ACCESS PROFILE */}
-                      <td className="py-3.5 px-4 whitespace-nowrap">
+                      <td className="py-3.5 px-4 whitespace-nowrap text-center">
                         <span className={`inline-block font-mono font-bold px-2 py-0.5 rounded text-[10px] ${
                           u.role === 'MASTER_ADMIN'
                             ? 'bg-amber-100 text-amber-900 border border-amber-300'
@@ -673,9 +676,41 @@ export const UserControlView: React.FC<UserControlViewProps> = ({
                         </select>
                       </td>
 
+                      {/* ACESSO À FILA DE GOVERNANÇA */}
+                      <td className="py-3.5 px-4 whitespace-nowrap text-center">
+                        <select
+                          value={u.role === 'MASTER_ADMIN' ? 'EDIT' : (u.governanceQueueAccess || 'NONE')}
+                          disabled={u.role === 'MASTER_ADMIN'}
+                          onChange={(e) => {
+                            const val = e.target.value as GovernanceQueueAccess;
+                            const updated: UserAccount[] = users.map((user) =>
+                              user.id === u.id ? { ...user, governanceQueueAccess: val } : user
+                            );
+                            onUpdateUsers(updated);
+                            const labelMap: Record<GovernanceQueueAccess, string> = {
+                              NONE: 'Sem Acesso à Fila',
+                              VIEW: 'Visualizar Fila',
+                              EDIT: 'Editar / Inserir Cód. TOTVS',
+                            };
+                            onShowToast(`Permissão na Fila de Governança de ${u.name} alterada para: ${labelMap[val]}.`);
+                          }}
+                          className={`text-[10px] font-mono font-bold py-1 px-2 rounded-lg border focus:outline-none shadow-2xs ${
+                            u.role === 'MASTER_ADMIN' || u.governanceQueueAccess === 'EDIT'
+                              ? 'bg-emerald-50 text-emerald-900 border-emerald-300'
+                              : u.governanceQueueAccess === 'VIEW'
+                              ? 'bg-blue-50 text-blue-900 border-blue-300'
+                              : 'bg-slate-50 text-slate-500 border-slate-200'
+                          }`}
+                        >
+                          <option value="NONE">Sem Acesso</option>
+                          <option value="VIEW">Visualizar</option>
+                          <option value="EDIT">Editar / Cód. TOTVS</option>
+                        </select>
+                      </td>
+
                       {/* TENANT */}
-                      <td className="py-3.5 px-4 whitespace-nowrap">
-                        <div className="flex items-center gap-1.5 text-xs text-slate-700 font-medium">
+                      <td className="py-3.5 px-4 whitespace-nowrap text-center">
+                        <div className="flex items-center justify-center gap-1.5 text-xs text-slate-700 font-medium">
                           <Building2 className="w-3.5 h-3.5 text-slate-400 shrink-0" />
                           <span>{u.tenantName || 'Unidade Padrão'}</span>
                         </div>
@@ -702,11 +737,11 @@ export const UserControlView: React.FC<UserControlViewProps> = ({
                       </td>
 
                       {/* DATES & APPROVER */}
-                      <td className="py-3.5 px-4 whitespace-nowrap text-[11px] font-mono text-slate-500">
+                      <td className="py-3.5 px-4 whitespace-nowrap text-center text-[11px] font-mono text-slate-500">
                         {u.approvedAt ? (
                           <div>
                             <span className="text-emerald-800 font-semibold">Liberado em:</span> {new Date(u.approvedAt).toLocaleDateString('pt-BR')}
-                            <div className="text-[10px] text-slate-400 truncate max-w-[150px]">
+                            <div className="text-[10px] text-slate-400 truncate max-w-[150px] mx-auto">
                               Por: {u.approvedBy || 'Master Admin'}
                             </div>
                           </div>
@@ -1046,6 +1081,23 @@ export const UserControlView: React.FC<UserControlViewProps> = ({
                 </select>
               </div>
 
+              {/* Acesso à Fila de Governança */}
+              <div>
+                <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                  Permissão na Fila de Governança *
+                </label>
+                <select
+                  value={formRole === 'MASTER_ADMIN' ? 'EDIT' : formGovernanceAccess}
+                  disabled={formRole === 'MASTER_ADMIN'}
+                  onChange={(e) => setFormGovernanceAccess(e.target.value as GovernanceQueueAccess)}
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 bg-white text-slate-900 font-semibold focus:outline-none focus:border-emerald-600"
+                >
+                  <option value="NONE">Sem Acesso à Fila de Governança</option>
+                  <option value="VIEW">Visualizar Solicitações (Somente Leitura)</option>
+                  <option value="EDIT">Editar / Inserir Código TOTVS & Finalizar Demandas</option>
+                </select>
+              </div>
+
               {/* Senha com Validação Estrita */}
               <div className="space-y-2">
                 <label className="block text-[11px] font-bold text-slate-700">
@@ -1187,6 +1239,27 @@ export const UserControlView: React.FC<UserControlViewProps> = ({
                   onChange={(e) => setEditingUser({ ...editingUser, department: e.target.value })}
                   className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 bg-white text-slate-900"
                 />
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                  Permissão na Fila de Governança
+                </label>
+                <select
+                  value={editingUser.role === 'MASTER_ADMIN' ? 'EDIT' : (editingUser.governanceQueueAccess || 'NONE')}
+                  disabled={editingUser.role === 'MASTER_ADMIN'}
+                  onChange={(e) =>
+                    setEditingUser({
+                      ...editingUser,
+                      governanceQueueAccess: e.target.value as GovernanceQueueAccess,
+                    })
+                  }
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 bg-white text-slate-900 font-semibold"
+                >
+                  <option value="NONE">Sem Acesso à Fila</option>
+                  <option value="VIEW">Visualizar Solicitações</option>
+                  <option value="EDIT">Editar / Inserir Código TOTVS & Finalizar</option>
+                </select>
               </div>
 
               <div className="pt-3 flex justify-end gap-2">

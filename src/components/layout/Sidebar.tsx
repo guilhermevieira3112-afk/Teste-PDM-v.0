@@ -4,7 +4,6 @@ import {
   CheckSquare, 
   Package, 
   BarChart3, 
-  Plus, 
   LogOut,
   FileSpreadsheet,
   Users,
@@ -14,6 +13,7 @@ import {
 import { UserRole } from '../../types/pdm';
 import { UserAccount } from '../../types/auth';
 import { PremierPetLogo } from './PremierPetLogo';
+import { DogPawIcon } from '../common/DogPawIcon';
 
 interface SidebarProps {
   currentTab: 'catalog' | 'pdm-classification' | 'governance' | 'inventory' | 'abc' | 'totvs-import' | 'user-control' | 'pdm-fields';
@@ -21,7 +21,6 @@ interface SidebarProps {
   currentUserRole: UserRole;
   pendingGovCount: number;
   lowStockCount: number;
-  totalCatalogCount: number;
   pendingUsersCount?: number;
   onOpenPdmBuilder: () => void;
   currentUserAccount?: UserAccount | null;
@@ -34,7 +33,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
   currentUserRole,
   pendingGovCount,
   lowStockCount,
-  totalCatalogCount,
   pendingUsersCount = 0,
   onOpenPdmBuilder,
   currentUserAccount,
@@ -70,7 +68,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           onClick={() => setCurrentTab('catalog')}
           title={!isExpanded ? 'Catálogo Mestre PDM' : undefined}
           className={`relative w-full flex items-center rounded-lg text-xs font-semibold transition-all ${
-            isExpanded ? 'justify-between px-3 py-2.5' : 'justify-center px-0 py-2.5'
+            isExpanded ? 'justify-start px-3 py-2.5' : 'justify-center px-0 py-2.5'
           } ${
             currentTab === 'catalog'
               ? 'bg-emerald-600 text-white shadow-sm'
@@ -81,15 +79,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
             <Layers className={`w-4 h-4 shrink-0 ${currentTab === 'catalog' ? 'text-white' : 'text-slate-500'}`} />
             {isExpanded && <span className="truncate">Catálogo Mestre PDM</span>}
           </div>
-          {isExpanded && (
-            <span
-              className={`text-[11px] font-mono px-1.5 py-0.5 rounded shrink-0 ${
-                currentTab === 'catalog' ? 'bg-emerald-700 text-emerald-100' : 'bg-slate-100 text-slate-600'
-              }`}
-            >
-              {totalCatalogCount}
-            </span>
-          )}
         </button>
 
         {/* Tab 1.5: Consulta por Classificação PDM (Todos os Usuários) */}
@@ -97,7 +86,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           onClick={() => setCurrentTab('pdm-classification')}
           title={!isExpanded ? 'Consulta por classificação PDM' : undefined}
           className={`relative w-full flex items-center rounded-lg text-xs font-semibold transition-all ${
-            isExpanded ? 'justify-between px-3 py-2.5' : 'justify-center px-0 py-2.5'
+            isExpanded ? 'justify-start px-3 py-2.5' : 'justify-center px-0 py-2.5'
           } ${
             currentTab === 'pdm-classification'
               ? 'bg-emerald-600 text-white shadow-sm'
@@ -108,42 +97,32 @@ export const Sidebar: React.FC<SidebarProps> = ({
             <ListTree className={`w-4 h-4 shrink-0 ${currentTab === 'pdm-classification' ? 'text-white' : 'text-slate-500'}`} />
             {isExpanded && <span className="truncate">Consulta por classificação PDM</span>}
           </div>
-          {isExpanded && (
-            <span
-              className={`text-[10px] font-mono font-bold px-1.5 py-0.5 rounded shrink-0 ${
-                currentTab === 'pdm-classification' ? 'bg-emerald-700 text-emerald-100' : 'bg-emerald-100 text-emerald-800'
-              }`}
-            >
-              3 Níveis
-            </span>
-          )}
         </button>
 
         {/* Tab 2: Governance & Sanitation */}
-        <button
-          onClick={() => setCurrentTab('governance')}
-          title={!isExpanded ? 'Fila de Governança' : undefined}
-          className={`relative w-full flex items-center rounded-lg text-xs font-semibold transition-all ${
-            isExpanded ? 'justify-between px-3 py-2.5' : 'justify-center px-0 py-2.5'
-          } ${
-            currentTab === 'governance'
-              ? 'bg-emerald-600 text-white shadow-sm'
-              : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
-          }`}
-        >
-          <div className="flex items-center gap-2.5 min-w-0">
-            <CheckSquare className={`w-4 h-4 shrink-0 ${currentTab === 'governance' ? 'text-white' : 'text-slate-500'}`} />
-            {isExpanded && <span className="truncate">Fila de Governança</span>}
-          </div>
-          {isExpanded && pendingGovCount > 0 && (
-            <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-amber-500 text-slate-950 shrink-0">
-              {pendingGovCount}
-            </span>
-          )}
-          {!isExpanded && pendingGovCount > 0 && (
-            <span className="absolute top-1.5 right-2.5 w-2 h-2 rounded-full bg-amber-500 ring-2 ring-white" />
-          )}
-        </button>
+        {(currentUserRole === 'MASTER_ADMIN' ||
+          (currentUserAccount?.governanceQueueAccess && currentUserAccount.governanceQueueAccess !== 'NONE') ||
+          Boolean(currentUserAccount?.approvalTier)) && (
+          <button
+            onClick={() => setCurrentTab('governance')}
+            title={!isExpanded ? 'Fila de Governança' : undefined}
+            className={`relative w-full flex items-center rounded-lg text-xs font-semibold transition-all ${
+              isExpanded ? 'justify-start px-3 py-2.5' : 'justify-center px-0 py-2.5'
+            } ${
+              currentTab === 'governance'
+                ? 'bg-emerald-600 text-white shadow-sm'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+            }`}
+          >
+            <div className="flex items-center gap-2.5 min-w-0">
+              <CheckSquare className={`w-4 h-4 shrink-0 ${currentTab === 'governance' ? 'text-white' : 'text-slate-500'}`} />
+              {isExpanded && <span className="truncate">Fila de Governança</span>}
+            </div>
+            {!isExpanded && pendingGovCount > 0 && (
+              <span className="absolute top-1.5 right-2.5 w-2 h-2 rounded-full bg-amber-500 ring-2 ring-white" />
+            )}
+          </button>
+        )}
 
         {/* Tab 2.5: Carga & Auditoria TOTVS (Exclusivo Master Admin) */}
         {currentUserRole === 'MASTER_ADMIN' && (
@@ -151,7 +130,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             onClick={() => setCurrentTab('totvs-import')}
             title={!isExpanded ? 'Carga & Auditoria TOTVS' : undefined}
             className={`relative w-full flex items-center rounded-lg text-xs font-semibold transition-all ${
-              isExpanded ? 'justify-between px-3 py-2.5' : 'justify-center px-0 py-2.5'
+              isExpanded ? 'justify-start px-3 py-2.5' : 'justify-center px-0 py-2.5'
             } ${
               currentTab === 'totvs-import'
                 ? 'bg-emerald-600 text-white shadow-sm'
@@ -162,15 +141,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
               <FileSpreadsheet className={`w-4 h-4 shrink-0 ${currentTab === 'totvs-import' ? 'text-white' : 'text-slate-500'}`} />
               {isExpanded && <span className="truncate">Carga & Auditoria TOTVS</span>}
             </div>
-            {isExpanded && (
-              <span
-                className={`text-[10px] font-mono font-bold px-1.5 py-0.5 rounded shrink-0 ${
-                  currentTab === 'totvs-import' ? 'bg-emerald-700 text-emerald-100' : 'bg-blue-100 text-blue-800'
-                }`}
-              >
-                CSV
-              </span>
-            )}
           </button>
         )}
 
@@ -180,7 +150,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             onClick={() => setCurrentTab('user-control')}
             title={!isExpanded ? 'Controle de usuários' : undefined}
             className={`relative w-full flex items-center rounded-lg text-xs font-semibold transition-all ${
-              isExpanded ? 'justify-between px-3 py-2.5' : 'justify-center px-0 py-2.5'
+              isExpanded ? 'justify-start px-3 py-2.5' : 'justify-center px-0 py-2.5'
             } ${
               currentTab === 'user-control'
                 ? 'bg-emerald-600 text-white shadow-sm'
@@ -191,21 +161,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
               <Users className={`w-4 h-4 shrink-0 ${currentTab === 'user-control' ? 'text-white' : 'text-slate-500'}`} />
               {isExpanded && <span className="truncate">Controle de usuários</span>}
             </div>
-            {isExpanded && (
-              pendingUsersCount > 0 ? (
-                <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-amber-500 text-slate-950 animate-pulse shrink-0">
-                  {pendingUsersCount}
-                </span>
-              ) : (
-                <span
-                  className={`text-[10px] font-mono font-bold px-1.5 py-0.5 rounded shrink-0 ${
-                    currentTab === 'user-control' ? 'bg-emerald-700 text-emerald-100' : 'bg-slate-100 text-slate-500'
-                  }`}
-                >
-                  Admin
-                </span>
-              )
-            )}
             {!isExpanded && pendingUsersCount > 0 && (
               <span className="absolute top-1.5 right-2.5 w-2 h-2 rounded-full bg-amber-500 ring-2 ring-white animate-pulse" />
             )}
@@ -218,7 +173,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             onClick={() => setCurrentTab('pdm-fields')}
             title={!isExpanded ? 'Edição de campos PDM' : undefined}
             className={`relative w-full flex items-center rounded-lg text-xs font-semibold transition-all ${
-              isExpanded ? 'justify-between px-3 py-2.5' : 'justify-center px-0 py-2.5'
+              isExpanded ? 'justify-start px-3 py-2.5' : 'justify-center px-0 py-2.5'
             } ${
               currentTab === 'pdm-fields'
                 ? 'bg-emerald-600 text-white shadow-sm'
@@ -229,70 +184,51 @@ export const Sidebar: React.FC<SidebarProps> = ({
               <FolderTree className={`w-4 h-4 shrink-0 ${currentTab === 'pdm-fields' ? 'text-white' : 'text-slate-500'}`} />
               {isExpanded && <span className="truncate">Edição de campos PDM</span>}
             </div>
-            {isExpanded && (
-              <span
-                className={`text-[10px] font-mono font-bold px-1.5 py-0.5 rounded shrink-0 ${
-                  currentTab === 'pdm-fields' ? 'bg-emerald-700 text-emerald-100' : 'bg-amber-100 text-amber-800'
-                }`}
-              >
-                3 Níveis
-              </span>
+          </button>
+        )}
+
+        {/* Tab 3: Local Inventory / Almoxarifado Industrial (Oculto para Manutenção/Produção) */}
+        {currentUserRole !== 'MANUTENCAO_PRODUCAO' && (
+          <button
+            onClick={() => setCurrentTab('inventory')}
+            title={!isExpanded ? 'Almoxarifado Local' : undefined}
+            className={`relative w-full flex items-center rounded-lg text-xs font-semibold transition-all ${
+              isExpanded ? 'justify-start px-3 py-2.5' : 'justify-center px-0 py-2.5'
+            } ${
+              currentTab === 'inventory'
+                ? 'bg-emerald-600 text-white shadow-sm'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+            }`}
+          >
+            <div className="flex items-center gap-2.5 min-w-0">
+              <Package className={`w-4 h-4 shrink-0 ${currentTab === 'inventory' ? 'text-white' : 'text-slate-500'}`} />
+              {isExpanded && <span className="truncate">Almoxarifado Local</span>}
+            </div>
+            {!isExpanded && lowStockCount > 0 && (
+              <span className="absolute top-1.5 right-2.5 w-2 h-2 rounded-full bg-rose-500 ring-2 ring-white" />
             )}
           </button>
         )}
 
-        {/* Tab 3: Local Inventory */}
-        <button
-          onClick={() => setCurrentTab('inventory')}
-          title={!isExpanded ? 'Almoxarifado Local' : undefined}
-          className={`relative w-full flex items-center rounded-lg text-xs font-semibold transition-all ${
-            isExpanded ? 'justify-between px-3 py-2.5' : 'justify-center px-0 py-2.5'
-          } ${
-            currentTab === 'inventory'
-              ? 'bg-emerald-600 text-white shadow-sm'
-              : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
-          }`}
-        >
-          <div className="flex items-center gap-2.5 min-w-0">
-            <Package className={`w-4 h-4 shrink-0 ${currentTab === 'inventory' ? 'text-white' : 'text-slate-500'}`} />
-            {isExpanded && <span className="truncate">Almoxarifado Local</span>}
-          </div>
-          {isExpanded && lowStockCount > 0 && (
-            <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-rose-500 text-white shrink-0">
-              {lowStockCount}
-            </span>
-          )}
-          {!isExpanded && lowStockCount > 0 && (
-            <span className="absolute top-1.5 right-2.5 w-2 h-2 rounded-full bg-rose-500 ring-2 ring-white" />
-          )}
-        </button>
-
-        {/* Tab 4: Industrial ABC Curve */}
-        <button
-          onClick={() => setCurrentTab('abc')}
-          title={!isExpanded ? 'Curva ABC Industrial' : undefined}
-          className={`relative w-full flex items-center rounded-lg text-xs font-semibold transition-all ${
-            isExpanded ? 'justify-between px-3 py-2.5' : 'justify-center px-0 py-2.5'
-          } ${
-            currentTab === 'abc'
-              ? 'bg-emerald-600 text-white shadow-sm'
-              : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
-          }`}
-        >
-          <div className="flex items-center gap-2.5 min-w-0">
-            <BarChart3 className={`w-4 h-4 shrink-0 ${currentTab === 'abc' ? 'text-white' : 'text-slate-500'}`} />
-            {isExpanded && <span className="truncate">Curva ABC Industrial</span>}
-          </div>
-          {isExpanded && (
-            <span
-              className={`text-[10px] font-mono font-bold px-1.5 py-0.5 rounded shrink-0 ${
-                currentTab === 'abc' ? 'bg-emerald-700 text-emerald-100' : 'bg-amber-100 text-amber-800'
-              }`}
-            >
-              Pareto
-            </span>
-          )}
-        </button>
+        {/* Tab 4: Industrial ABC Curve (Restrito: oculto para Manutenção/Produção) */}
+        {currentUserRole !== 'MANUTENCAO_PRODUCAO' && (
+          <button
+            onClick={() => setCurrentTab('abc')}
+            title={!isExpanded ? 'Curva ABC Industrial' : undefined}
+            className={`relative w-full flex items-center rounded-lg text-xs font-semibold transition-all ${
+              isExpanded ? 'justify-start px-3 py-2.5' : 'justify-center px-0 py-2.5'
+            } ${
+              currentTab === 'abc'
+                ? 'bg-emerald-600 text-white shadow-sm'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+            }`}
+          >
+            <div className="flex items-center gap-2.5 min-w-0">
+              <BarChart3 className={`w-4 h-4 shrink-0 ${currentTab === 'abc' ? 'text-white' : 'text-slate-500'}`} />
+              {isExpanded && <span className="truncate">Curva ABC Industrial</span>}
+            </div>
+          </button>
+        )}
 
         {/* QUICK ACTION BUTTON */}
         <div className="pt-3">
@@ -303,7 +239,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
               isExpanded ? 'px-3' : 'px-0'
             }`}
           >
-            <Plus className="w-4 h-4 stroke-[2.5] shrink-0" />
+            <DogPawIcon className="w-4 h-4 shrink-0" />
             {isExpanded && <span className="whitespace-nowrap">Novo Cadastro PDM</span>}
           </button>
         </div>

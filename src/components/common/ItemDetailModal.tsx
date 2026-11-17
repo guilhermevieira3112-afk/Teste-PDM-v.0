@@ -28,6 +28,7 @@ import {
   Lock
 } from 'lucide-react';
 import { PDMItem, TenantStockItem, Tenant, UserRole } from '../../types/pdm';
+import { ItemChangeHistoryTable } from './ItemChangeHistoryTable';
 
 interface ItemDetailModalProps {
   isOpen: boolean;
@@ -295,7 +296,7 @@ export const ItemDetailModal: React.FC<ItemDetailModalProps> = ({
                     Item Cadastrado Diretamente no TOTVS (Pendente de Saneamento PDM)
                   </strong>
                   <p className="text-[11px] text-amber-800 mt-0.5 leading-snug">
-                    Este item foi gerado no ERP Protheus sem aprovação prévia de governança e sem classificação dos 3 níveis MRO.
+                    Este item foi gerado no ERP TOTVS sem aprovação prévia de governança e sem classificação dos 3 níveis MRO.
                   </p>
                 </div>
               </div>
@@ -805,27 +806,23 @@ export const ItemDetailModal: React.FC<ItemDetailModalProps> = ({
               </div>
 
               {/* CLASSIFICAÇÃO FISCAL E ATRIBUTOS */}
-              <div className="rounded-xl border border-slate-200 overflow-hidden bg-white shadow-2xs">
-                <table className="w-full text-left text-xs">
-                  <thead className="bg-slate-50 text-slate-500 font-mono text-[11px] border-b border-slate-200">
+              <div className="rounded-xl border border-slate-200 overflow-auto max-h-72 bg-white shadow-2xs">
+                <table className="w-full text-center text-xs">
+                  <thead className="bg-slate-50 text-slate-500 font-mono text-[11px] border-b border-slate-200 sticky top-0 z-20 shadow-[0_1px_0_0_#e2e8f0]">
                     <tr>
-                      <th className="py-2.5 px-3">Parâmetro / Atributo</th>
-                      <th className="py-2.5 px-3">Especificação Técnica</th>
+                      <th className="py-2.5 px-3 text-center">Parâmetro / Atributo</th>
+                      <th className="py-2.5 px-3 text-center">Especificação Técnica</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 font-mono">
                     <tr className="bg-slate-50/70">
-                      <td className="py-2 px-3 text-slate-500">Classificação Fiscal (NCM)</td>
-                      <td className="py-2 px-3 text-emerald-800 font-bold">{item.ncm || '8482.10.10'}</td>
-                    </tr>
-                    <tr className="bg-slate-50/70">
-                      <td className="py-2 px-3 text-slate-500">Código UNSPSC</td>
-                      <td className="py-2 px-3 text-slate-700">{item.unspsc || '31171504'}</td>
+                      <td className="py-2 px-3 text-center text-slate-500">Classificação Fiscal (NCM)</td>
+                      <td className="py-2 px-3 text-center text-emerald-800 font-bold">{item.ncm || '8482.10.10'}</td>
                     </tr>
                     {Object.entries(item.attributes || {}).map(([key, val]) => (
                       <tr key={key} className="hover:bg-slate-50">
-                        <td className="py-2 px-3 text-slate-500 font-medium capitalize">{key.replace(/_/g, ' ')}</td>
-                        <td className="py-2 px-3 text-slate-900 font-semibold">{val}</td>
+                        <td className="py-2 px-3 text-center text-slate-500 font-medium capitalize">{key.replace(/_/g, ' ')}</td>
+                        <td className="py-2 px-3 text-center text-slate-900 font-semibold">{val}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -1038,21 +1035,21 @@ export const ItemDetailModal: React.FC<ItemDetailModalProps> = ({
                     <p className="italic">{item.pendingChange.reason}</p>
                   </div>
 
-                  <div className="rounded-lg border border-amber-200 overflow-hidden bg-white">
-                    <table className="w-full text-left text-xs">
-                      <thead className="bg-amber-100/60 font-mono text-[10px] text-amber-950 border-b border-amber-200">
+                  <div className="rounded-lg border border-amber-200 overflow-auto max-h-72 bg-white">
+                    <table className="w-full text-center text-xs">
+                      <thead className="bg-amber-100 font-mono text-[10px] text-amber-950 border-b border-amber-200 sticky top-0 z-20 shadow-[0_1px_0_0_#fde68a]">
                         <tr>
-                          <th className="py-1.5 px-3">Campo a Alterar</th>
-                          <th className="py-1.5 px-3">Valor Atual</th>
-                          <th className="py-1.5 px-3">Novo Valor Proposto</th>
+                          <th className="py-1.5 px-3 text-center">Campo a Alterar</th>
+                          <th className="py-1.5 px-3 text-center">Valor Atual</th>
+                          <th className="py-1.5 px-3 text-center">Novo Valor Proposto</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-amber-100 text-[11px] font-mono">
                         {item.pendingChange.changes.map((ch, idx) => (
                           <tr key={idx} className="bg-amber-50/30">
-                            <td className="py-2 px-3 font-semibold text-slate-700">{ch.fieldLabel}</td>
-                            <td className="py-2 px-3 text-slate-500 line-through truncate max-w-[150px]">{ch.oldValue || '—'}</td>
-                            <td className="py-2 px-3 text-emerald-800 font-bold truncate max-w-[200px]">{ch.newValue || '—'}</td>
+                            <td className="py-2 px-3 text-center font-semibold text-slate-700">{ch.fieldLabel}</td>
+                            <td className="py-2 px-3 text-center text-slate-500 line-through truncate max-w-[150px]">{ch.oldValue || '—'}</td>
+                            <td className="py-2 px-3 text-center text-emerald-800 font-bold truncate max-w-[200px]">{ch.newValue || '—'}</td>
                           </tr>
                         ))}
                       </tbody>
@@ -1075,103 +1072,7 @@ export const ItemDetailModal: React.FC<ItemDetailModalProps> = ({
                   </span>
                 </div>
 
-                {(!item.changeHistory || item.changeHistory.length === 0) ? (
-                  <div className="p-8 text-center bg-white rounded-xl border border-slate-200 text-slate-500">
-                    <History className="w-8 h-8 text-slate-300 mx-auto mb-2" />
-                    <p className="text-xs font-semibold text-slate-700">Nenhuma alteração cadastral registrada</p>
-                    <p className="text-[11px] text-slate-400 mt-0.5">
-                      Este item permanece com os dados originais importados da carga TOTVS.
-                    </p>
-                  </div>
-                ) : (
-                  <div className="space-y-3 pt-1">
-                    {item.changeHistory.map((rev) => (
-                      <div 
-                        key={rev.id}
-                        className="p-3.5 rounded-xl bg-white border border-slate-200 shadow-2xs space-y-2.5 transition-all"
-                      >
-                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-2">
-                          <div className="flex items-center gap-2">
-                            <span className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold border ${
-                              rev.status === 'APPROVED'
-                                ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
-                                : rev.status === 'REJECTED'
-                                ? 'bg-rose-50 text-rose-800 border-rose-200'
-                                : 'bg-amber-50 text-amber-800 border-amber-200'
-                            }`}>
-                              {rev.status === 'APPROVED' ? 'Aprovado & Efetivado' : rev.status === 'REJECTED' ? 'Rejeitado pela Governança' : 'Pendente'}
-                            </span>
-                            <span className="text-xs font-bold text-slate-800">
-                              {rev.requestedByUser}
-                            </span>
-                            {rev.requestedByTenantName && (
-                              <span className="text-[10px] text-slate-500">
-                                ({rev.requestedByTenantName})
-                              </span>
-                            )}
-                          </div>
-                          <div className="flex items-center gap-2 text-[11px] text-slate-400 font-mono">
-                            <Calendar className="w-3 h-3 text-slate-400" />
-                            <span>
-                              {new Date(rev.timestamp).toLocaleDateString('pt-BR')} às {new Date(rev.timestamp).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
-                            </span>
-                          </div>
-                        </div>
-
-                        {/* JUSTIFICATIVA */}
-                        {rev.reason && (
-                          <div className="text-[11px] text-slate-600 bg-slate-50 p-2 rounded-lg border border-slate-100">
-                            <strong className="text-slate-700 font-semibold">Justificativa técnica: </strong>
-                            <span>{rev.reason}</span>
-                          </div>
-                        )}
-
-                        {/* REJEIÇÃO */}
-                        {rev.rejectionReason && (
-                          <div className="text-[11px] text-rose-700 bg-rose-50 p-2 rounded-lg border border-rose-100">
-                            <strong className="text-rose-800 font-semibold">Motivo da Rejeição: </strong>
-                            <span>{rev.rejectionReason}</span>
-                          </div>
-                        )}
-
-                        {/* APROVADOR */}
-                        {rev.approvedByUser && (
-                          <div className="flex items-center gap-1.5 text-[11px] text-emerald-800 font-medium">
-                            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-                            <span>
-                              Aprovador Master: <strong>{rev.approvedByUser}</strong>
-                              {rev.approvedAt && ` em ${new Date(rev.approvedAt).toLocaleDateString('pt-BR')}`}
-                            </span>
-                          </div>
-                        )}
-
-                        {/* TABELA DE DIFF */}
-                        {rev.changes && rev.changes.length > 0 && (
-                          <div className="rounded-lg border border-slate-200 overflow-hidden text-xs">
-                            <table className="w-full text-left">
-                              <thead className="bg-slate-50 text-[10px] font-mono text-slate-500 border-b border-slate-200">
-                                <tr>
-                                  <th className="py-1 px-2.5">Campo Alterado</th>
-                                  <th className="py-1 px-2.5">Valor Anterior</th>
-                                  <th className="py-1 px-2.5">Novo Valor</th>
-                                </tr>
-                              </thead>
-                              <tbody className="divide-y divide-slate-100 text-[11px] font-mono">
-                                {rev.changes.map((ch, idx) => (
-                                  <tr key={idx} className="hover:bg-slate-50/50">
-                                    <td className="py-1.5 px-2.5 font-semibold text-slate-700">{ch.fieldLabel}</td>
-                                    <td className="py-1.5 px-2.5 text-slate-500 line-through truncate max-w-[150px]">{ch.oldValue || '—'}</td>
-                                    <td className="py-1.5 px-2.5 text-emerald-800 font-bold truncate max-w-[200px]">{ch.newValue || '—'}</td>
-                                  </tr>
-                                ))}
-                              </tbody>
-                            </table>
-                          </div>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                )}
+                <ItemChangeHistoryTable history={item.changeHistory} />
               </div>
 
             </div>
@@ -1182,7 +1083,7 @@ export const ItemDetailModal: React.FC<ItemDetailModalProps> = ({
         {/* FOOTER */}
         <div className="shrink-0 px-6 py-3.5 border-t border-slate-200 bg-slate-50 flex items-center justify-between">
           <div className="text-[11px] font-mono text-slate-400">
-            TOTVS Protheus · Base Oficial CE0348 & Itens
+            TOTVS · Base Oficial CE0348 & Itens
           </div>
           <button
             onClick={onClose}

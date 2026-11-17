@@ -753,23 +753,24 @@ export const PdmFieldsEditorView: React.FC<PdmFieldsEditorViewProps> = ({
           </div>
 
           <div className="rounded-2xl border border-slate-200 bg-white overflow-hidden shadow-xs">
-            <table className="w-full text-left text-xs border-collapse">
-              <thead>
-                <tr className="border-b border-slate-200 bg-slate-50/80 text-slate-500 font-mono text-[11px] uppercase tracking-wider">
-                  <th className="py-3 px-4">#</th>
-                  <th className="py-3 px-4">Nível 1 · Grupo Macro</th>
-                  <th className="py-3 px-4">Nível 2 · Subgrupo / Família</th>
-                  <th className="py-3 px-4">Nível 3 · Subgrupo Específico</th>
+            <div className="overflow-auto max-h-[65vh]">
+              <table className="w-full text-center text-xs border-collapse">
+                <thead className="sticky top-0 z-20 bg-slate-50 shadow-[0_1px_0_0_#e2e8f0]">
+                  <tr className="border-b border-slate-200 bg-slate-50 text-slate-500 font-mono text-[11px] uppercase tracking-wider">
+                  <th className="py-3 px-4 text-center">#</th>
+                  <th className="py-3 px-4 text-center">Nível 1 · Grupo Macro</th>
+                  <th className="py-3 px-4 text-center">Nível 2 · Subgrupo / Família</th>
+                  <th className="py-3 px-4 text-center">Nível 3 · Subgrupo Específico</th>
                   <th className="py-3 px-4 text-center">Ações</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 font-sans">
                 {filteredTableNiveis.map((row, idx) => (
                   <tr key={row.id || `${row.nivel1}-${row.nivel2}-${row.nivel3}-${idx}`} className="hover:bg-slate-50/80 transition-colors">
-                    <td className="py-3 px-4 font-mono text-[11px] text-slate-400">{idx + 1}</td>
-                    <td className="py-3 px-4 font-semibold text-slate-900">{row.nivel1}</td>
-                    <td className="py-3 px-4 font-medium text-slate-800">{row.nivel2}</td>
-                    <td className="py-3 px-4 font-mono text-emerald-800 font-bold">{row.nivel3}</td>
+                    <td className="py-3 px-4 text-center font-mono text-[11px] text-slate-400">{idx + 1}</td>
+                    <td className="py-3 px-4 text-center font-semibold text-slate-900">{row.nivel1}</td>
+                    <td className="py-3 px-4 text-center font-medium text-slate-800">{row.nivel2}</td>
+                    <td className="py-3 px-4 text-center font-mono text-emerald-800 font-bold">{row.nivel3}</td>
                     <td className="py-3 px-4 text-center">
                       <div className="flex items-center justify-center gap-1.5">
                         <button
@@ -791,7 +792,8 @@ export const PdmFieldsEditorView: React.FC<PdmFieldsEditorViewProps> = ({
                   </tr>
                 ))}
               </tbody>
-            </table>
+              </table>
+            </div>
           </div>
         </div>
       )}

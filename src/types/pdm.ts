@@ -63,6 +63,39 @@ export interface EstabelecimentoStockData {
   ultimaSaida?: string; // Col S - Última Saída
 }
 
+export type TotvsFamilyCode = '5040' | '5060' | '5070';
+
+export const AVAILABLE_TOTVS_FAMILIES: {
+  code: TotvsFamilyCode;
+  label: string;
+  description: string;
+}[] = [
+  { code: '5040', label: '5040', description: 'Itens gerais e nacionalizados' },
+  { code: '5060', label: '5060', description: 'Itens fabricante originais e/ou importação' },
+  { code: '5070', label: '5070', description: 'Itens reparados' },
+];
+
+export const DEFAULT_ENABLED_TOTVS_FAMILIES: TotvsFamilyCode[] = ['5040', '5060', '5070'];
+
+export function getItemTotvsFamily(
+  item: Pick<PDMItem, 'totvsFamily' | 'totvsCode' | 'pdmCode'>
+): string {
+  const explicit = (item.totvsFamily || '').trim();
+  if (explicit) return explicit;
+  const code = (item.totvsCode || item.pdmCode || '').trim();
+  const match = code.match(/^(\d{4})-/);
+  return match ? match[1] : '';
+}
+
+export function isItemInEnabledFamilies(
+  item: Pick<PDMItem, 'totvsFamily' | 'totvsCode' | 'pdmCode'>,
+  enabledFamilies: TotvsFamilyCode[]
+): boolean {
+  const fam = getItemTotvsFamily(item);
+  if (!fam) return enabledFamilies.includes('5040');
+  return (enabledFamilies as string[]).includes(fam);
+}
+
 export interface PDMItem {
   id: string;
   pdmCode: string;
@@ -91,7 +124,7 @@ export interface PDMItem {
   totvsPlant?: string;
   situation?: string; // 'Ativo' | 'Totalmente Obsoleto' from Itens.csv
   originalDescription?: string;
-  narrative?: string; // Campo Narrativa do TOTVS Protheus (máx 200c, crucial para busca por part numbers e observações)
+  narrative?: string; // Campo Narrativa do TOTVS (máx 200c, crucial para busca por part numbers e observações)
   baseValue?: number;
   // MRO 3-Level Classification (Classificacao_Almoxarifado_MRO_Padronizado)
   nivel1?: string; // Nível 1: Grupo Macro
@@ -132,6 +165,49 @@ export interface QuotationData {
 
 export type ApprovalTierLevel = 1 | 2 | 3;
 
+export type GovernanceWorkflowStage =
+  | 'TIER_REVIEW'
+  | 'RETURNED_TO_UNIT_MASTER'
+  | 'DELEGATED_TO_ERP_EDITOR'
+  | 'COMPLETED';
+
+export interface GovernanceDelegationRecord {
+  assignedUserId: string;
+  assignedUserName: string;
+  assignedUsername?: string;
+  assignedByUser: string;
+  assignedAt: string;
+  unitTenantId?: string;
+  unitTenantName?: string;
+  notes?: string;
+}
+
+export interface GovernanceReturnFeedback {
+  returnedBy: string;
+  returnedAt: string;
+  stage: GovernanceWorkflowStage;
+  tier?: ApprovalTierLevel;
+  reason: string;
+}
+
+export interface GovernanceErpExecution {
+  totvsCodeEntered?: string;
+  erpProtocol?: string;
+  executedBy: string;
+  executedAt: string;
+  notes?: string;
+}
+
+export interface GovernanceRequestState {
+  stage: GovernanceWorkflowStage;
+  requiredTiers: ApprovalTierLevel[];
+  currentPendingTier: ApprovalTierLevel | null;
+  steps: ApprovalStepRecord[];
+  delegation?: GovernanceDelegationRecord;
+  returnFeedback?: GovernanceReturnFeedback;
+  erpExecution?: GovernanceErpExecution;
+}
+
 export interface ApprovalStepRecord {
   tier: ApprovalTierLevel;
   tierLabel: string; // "Nível 1 (até R$ 1.000)", "Nível 2 (até R$ 10.000)", "Nível 3 (> R$ 10.000)"
@@ -148,6 +224,10 @@ export interface ItemApprovalWorkflow {
   estimatedValue: number;
   steps: ApprovalStepRecord[];
   isFullyApproved: boolean;
+  stage?: GovernanceWorkflowStage;
+  delegation?: GovernanceDelegationRecord;
+  returnFeedback?: GovernanceReturnFeedback;
+  erpExecution?: GovernanceErpExecution;
   rejection?: {
     rejectedBy: string;
     rejectedAt: string;
@@ -179,6 +259,7 @@ export interface ItemIntegrationRequest {
   reviewedBy?: string;
   reviewedAt?: string;
   rejectionReason?: string;
+  workflowState?: GovernanceRequestState;
 }
 
 export interface ItemInactivationRequest {
@@ -196,6 +277,7 @@ export interface ItemInactivationRequest {
   reviewedBy?: string;
   reviewedAt?: string;
   rejectionReason?: string;
+  workflowState?: GovernanceRequestState;
 }
 
 export type ChangeActionType = 
@@ -241,6 +323,7 @@ export interface ItemPendingChange {
   reason: string;
   changes: ItemFieldChange[];
   proposedValues: Partial<PDMItem>;
+  workflowState?: GovernanceRequestState;
 }
 
 export type CriticismLevel = 'V' | 'E' | 'D'; // V = Vital, E = Essencial, D = Desejável

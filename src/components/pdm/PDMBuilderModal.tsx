@@ -1,26 +1,43 @@
 import React, { useState, useMemo } from 'react';
-import { 
-  X, 
-  Sparkles, 
-  Upload, 
-  Camera, 
-  AlertTriangle, 
-  CheckCircle2, 
-  FileText, 
-  Layers, 
-  ShieldAlert, 
+import {
+  X,
+  Upload,
+  Camera,
+  AlertTriangle,
+  CheckCircle2,
+  FileText,
+  Layers,
+  ShieldAlert,
   Info,
   Image as ImageIcon,
   Sliders,
   DollarSign,
   Paperclip,
-  FileCheck,
-  Check
+  Factory,
+  Hash,
+  Wand2
 } from 'lucide-react';
-import { Group, Subgroup, SpecificSubgroup, PDMItem, UserRole, Tenant, AttributeDefinition, ApprovalTierLevel, ApprovalStepRecord } from '../../types/pdm';
+import {
+  Group,
+  Subgroup,
+  SpecificSubgroup,
+  PDMItem,
+  UserRole,
+  Tenant,
+  AttributeDefinition,
+  ApprovalTierLevel,
+  ApprovalStepRecord
+} from '../../types/pdm';
+import { AVAILABLE_TOTVS_FAMILIES } from '../../types/pdm';
 import { INDUSTRIAL_TAXONOMY } from '../../data/taxonomy';
 import { PdmNivelItem, INITIAL_PDM_NIVEIS, getNiveis1List, getNiveis2List, getNiveis3List } from '../../data/pdmNiveisData';
 import { generateShortDescription, generateLongDescription, calculateDuplicateSimilarity } from '../../utils/pdmGenerator';
+import {
+  getDynamicSchemaForLevels,
+  validateUpperNoAccents,
+  sanitizeUpperNoAccents
+} from '../../utils/pdmDynamicAttributes';
+import { DogPawIcon } from '../common/DogPawIcon';
 
 interface PDMBuilderModalProps {
   isOpen: boolean;
@@ -48,31 +65,42 @@ export const PDMBuilderModal: React.FC<PDMBuilderModalProps> = ({
   );
 
   const [attributes, setAttributes] = useState<Record<string, string>>({});
+  const [hasSpecificManufacturer, setHasSpecificManufacturer] = useState<'NAO' | 'SIM'>('NAO');
+  const [specificManufacturer, setSpecificManufacturer] = useState<string>('');
+  const [manufacturerRefNumber, setManufacturerRefNumber] = useState<string>('');
+
   const [notes, setNotes] = useState<string>('');
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [ncmOverride, setNcmOverride] = useState<string>('');
-  const [unspscOverride, setUnspscOverride] = useState<string>('');
   const [totvsFamilyInput, setTotvsFamilyInput] = useState<string>('5040');
-  // TOTVS CE0348 fields
-  const [narrativeInput, setNarrativeInput] = useState<string>('');
+
+  // Section 3 agreement controls ("Concorda com a descrição? ( ) Sim ( ) Não, quero corrigir")
+  const [agreeShortDesc, setAgreeShortDesc] = useState<boolean>(true);
+  const [customShortDesc, setCustomShortDesc] = useState<string>('');
+  const [agreeLongDesc, setAgreeLongDesc] = useState<boolean>(true);
+  const [customLongDesc, setCustomLongDesc] = useState<string>('');
+
+  // Section 4: Parâmetros de Almoxarifado e ressuprimento
   const [leadTimeInput, setLeadTimeInput] = useState<number>(15);
   const [orderPointInput, setOrderPointInput] = useState<number>(1);
-  const [safetyStockInput, setSafetyStockInput] = useState<number>(1);
+  const [maxStockInput, setMaxStockInput] = useState<number>(2);
   const [unitOfMeasureInput, setUnitOfMeasureInput] = useState<string>('UN');
   const [targetEstab, setTargetEstab] = useState<'10' | '14' | 'BOTH'>('10');
 
-  // Quotation (Orçamento / Proposta Comercial obrigatório para novos itens)
+  // Section 5: Quotation (Orçamento / Proposta Comercial obrigatório para novos itens)
   const [supplierNameInput, setSupplierNameInput] = useState<string>('SKF do Brasil Ltda');
   const [quoteNumberInput, setQuoteNumberInput] = useState<string>('COT-2026-0849');
   const [quoteValueInput, setQuoteValueInput] = useState<number | ''>(850);
   const [quoteFileName, setQuoteFileName] = useState<string>('Orcamento_Comercial_Fornecedor_SKF.pdf');
-  const [quoteNotesInput, setQuoteNotesInput] = useState<string>('Proposta com frete CIF Fábrica PremieRpet e garantia técnica de 12 meses.');
+  const [quoteNotesInput] = useState<string>('Proposta com frete CIF Fábrica PremieRpet e garantia técnica de 12 meses.');
+
+  const [formError, setFormError] = useState<string | null>(null);
 
   // MRO 3-Level Dynamic Classification (Niveis_PDM_MRO_Padronizado)
   const effectiveLevels = useMemo(() => (pdmLevels && pdmLevels.length > 0 ? pdmLevels : INITIAL_PDM_NIVEIS), [pdmLevels]);
   const niveis1Options = useMemo(() => getNiveis1List(effectiveLevels), [effectiveLevels]);
   const [selectedNivel1, setSelectedNivel1] = useState<string>(() => niveis1Options[0] || 'Mecânica e Transmissão');
-  
+
   const niveis2Options = useMemo(() => {
     return getNiveis2List(effectiveLevels, selectedNivel1);
   }, [effectiveLevels, selectedNivel1]);
@@ -83,6 +111,40 @@ export const PDMBuilderModal: React.FC<PDMBuilderModalProps> = ({
   }, [effectiveLevels, selectedNivel1, selectedNivel2]);
   const [selectedNivel3, setSelectedNivel3] = useState<string>(() => niveis3Options[0] || '');
 
+  const activeGroup = useMemo(
+    () => INDUSTRIAL_TAXONOMY.find((g: Group) => g.id === selectedGroupId) || INDUSTRIAL_TAXONOMY[0],
+    [selectedGroupId]
+  );
+
+  const activeSubgroup = useMemo(
+    () => activeGroup.subgroups.find((s: Subgroup) => s.id === selectedSubgroupId) || activeGroup.subgroups[0],
+    [activeGroup, selectedSubgroupId]
+  );
+
+  const activeSpecificSubgroup = useMemo(
+    () =>
+      activeSubgroup.specificSubgroups.find((spec: SpecificSubgroup) => spec.id === selectedSpecificSubgroupId) ||
+      activeSubgroup.specificSubgroups[0],
+    [activeSubgroup, selectedSpecificSubgroupId]
+  );
+
+  // Dynamic Field 2 schema driven strictly by Levels 1, 2 & 3 (all attributes optional)
+  const dynamicSchema = useMemo(
+    () => getDynamicSchemaForLevels(selectedNivel1, selectedNivel2, selectedNivel3),
+    [selectedNivel1, selectedNivel2, selectedNivel3]
+  );
+
+  const handleGroupChange = (groupId: string) => {
+    setSelectedGroupId(groupId);
+    const grp = INDUSTRIAL_TAXONOMY.find((g: Group) => g.id === groupId);
+    if (grp && grp.subgroups.length > 0) {
+      setSelectedSubgroupId(grp.subgroups[0].id);
+      if (grp.subgroups[0].specificSubgroups.length > 0) {
+        setSelectedSpecificSubgroupId(grp.subgroups[0].specificSubgroups[0].id);
+      }
+    }
+  };
+
   const handleNivel1Change = (n1: string) => {
     setSelectedNivel1(n1);
     const n2s = getNiveis2List(effectiveLevels, n1);
@@ -90,12 +152,13 @@ export const PDMBuilderModal: React.FC<PDMBuilderModalProps> = ({
     setSelectedNivel2(firstN2);
     const n3s = getNiveis3List(effectiveLevels, n1, firstN2);
     setSelectedNivel3(n3s[0] || '');
+    setAttributes({});
+    setFormError(null);
 
-    // Map to group taxonomy for attributes
     const lower = n1.toLowerCase();
-    if (lower.includes('elétric') || lower.includes('automa')) {
+    if (lower.includes('elétric') || lower.includes('eletric') || lower.includes('automa')) {
       handleGroupChange('grp-eletrica');
-    } else if (lower.includes('hidrául') || lower.includes('pneumát') || lower.includes('utilidade')) {
+    } else if (lower.includes('hidrául') || lower.includes('hidraul') || lower.includes('pneumát') || lower.includes('pneumat') || lower.includes('utilidade')) {
       handleGroupChange('grp-tubulacao');
     } else {
       handleGroupChange('grp-mecanica');
@@ -106,52 +169,14 @@ export const PDMBuilderModal: React.FC<PDMBuilderModalProps> = ({
     setSelectedNivel2(n2);
     const n3s = getNiveis3List(effectiveLevels, selectedNivel1, n2);
     setSelectedNivel3(n3s[0] || '');
+    setAttributes({});
+    setFormError(null);
   };
 
   const handleNivel3Change = (n3: string) => {
     setSelectedNivel3(n3);
-  };
-
-  const activeGroup = useMemo(() => 
-    INDUSTRIAL_TAXONOMY.find((g: Group) => g.id === selectedGroupId) || INDUSTRIAL_TAXONOMY[0],
-    [selectedGroupId]
-  );
-
-  const activeSubgroup = useMemo(() => 
-    activeGroup.subgroups.find((s: Subgroup) => s.id === selectedSubgroupId) || activeGroup.subgroups[0],
-    [activeGroup, selectedSubgroupId]
-  );
-
-  const activeSpecificSubgroup = useMemo(() => 
-    activeSubgroup.specificSubgroups.find((spec: SpecificSubgroup) => spec.id === selectedSpecificSubgroupId) || activeSubgroup.specificSubgroups[0],
-    [activeSubgroup, selectedSpecificSubgroupId]
-  );
-
-  // When changing specific subgroup, reset attributes
-  const handleGroupChange = (groupId: string) => {
-    setSelectedGroupId(groupId);
-    const grp = INDUSTRIAL_TAXONOMY.find((g: Group) => g.id === groupId);
-    if (grp && grp.subgroups.length > 0) {
-      setSelectedSubgroupId(grp.subgroups[0].id);
-      if (grp.subgroups[0].specificSubgroups.length > 0) {
-        setSelectedSpecificSubgroupId(grp.subgroups[0].specificSubgroups[0].id);
-      }
-    }
     setAttributes({});
-  };
-
-  const handleSubgroupChange = (subgroupId: string) => {
-    setSelectedSubgroupId(subgroupId);
-    const sub = activeGroup.subgroups.find((s: Subgroup) => s.id === subgroupId);
-    if (sub && sub.specificSubgroups.length > 0) {
-      setSelectedSpecificSubgroupId(sub.specificSubgroups[0].id);
-    }
-    setAttributes({});
-  };
-
-  const handleSpecificSubgroupChange = (specId: string) => {
-    setSelectedSpecificSubgroupId(specId);
-    setAttributes({});
+    setFormError(null);
   };
 
   const handleAttributeChange = (attributeId: string, value: string) => {
@@ -161,14 +186,75 @@ export const PDMBuilderModal: React.FC<PDMBuilderModalProps> = ({
     }));
   };
 
-  // Real-time generated descriptions
-  const shortDescResult = useMemo(() => {
-    return generateShortDescription(activeSpecificSubgroup, attributes);
-  }, [activeSpecificSubgroup, attributes]);
+  // Build synthetic SpecificSubgroup from the active dynamic levels + manufacturer fields for description generators
+  const syntheticSubgroup = useMemo<SpecificSubgroup>(() => {
+    const extraDefs: AttributeDefinition[] = [...dynamicSchema.attributes];
+    if (hasSpecificManufacturer === 'SIM' && specificManufacturer.trim()) {
+      extraDefs.push({
+        id: '__manufacturer',
+        name: '__manufacturer',
+        label: 'Fabricante',
+        type: 'text',
+        orderInNarrative: 98,
+        required: false,
+      });
+    }
+    if (manufacturerRefNumber.trim()) {
+      extraDefs.push({
+        id: '__manufacturer_ref',
+        name: '__manufacturer_ref',
+        label: 'Ref. Fabricante',
+        type: 'text',
+        orderInNarrative: 99,
+        required: false,
+      });
+    }
+    return {
+      ...activeSpecificSubgroup,
+      name: selectedNivel3 || selectedNivel2 || selectedNivel1 || activeSpecificSubgroup.name,
+      shortPrefix: dynamicSchema.shortPrefix || activeSpecificSubgroup.shortPrefix,
+      defaultNcm: dynamicSchema.defaultNcm || activeSpecificSubgroup.defaultNcm,
+      defaultUnspsc: '',
+      attributeDefinitions: extraDefs,
+    };
+  }, [
+    dynamicSchema,
+    hasSpecificManufacturer,
+    specificManufacturer,
+    manufacturerRefNumber,
+    activeSpecificSubgroup,
+    selectedNivel1,
+    selectedNivel2,
+    selectedNivel3,
+  ]);
 
-  const longDesc = useMemo(() => {
-    return generateLongDescription(activeSpecificSubgroup, attributes);
-  }, [activeSpecificSubgroup, attributes]);
+  const combinedAttributesForGeneration = useMemo(() => {
+    const merged: Record<string, string> = { ...attributes };
+    if (hasSpecificManufacturer === 'SIM' && specificManufacturer.trim()) {
+      merged.__manufacturer = specificManufacturer.trim();
+    }
+    if (manufacturerRefNumber.trim()) {
+      merged.__manufacturer_ref = manufacturerRefNumber.trim();
+    }
+    return merged;
+  }, [attributes, hasSpecificManufacturer, specificManufacturer, manufacturerRefNumber]);
+
+  // Real-time generated descriptions (always uppercase, no accents; long desc strictly <= 200c)
+  const generatedShortDesc = useMemo(() => {
+    return generateShortDescription(syntheticSubgroup, combinedAttributesForGeneration);
+  }, [syntheticSubgroup, combinedAttributesForGeneration]);
+
+  const generatedLongDesc = useMemo(() => {
+    const raw = generateLongDescription(syntheticSubgroup, combinedAttributesForGeneration);
+    return sanitizeUpperNoAccents(raw, 200);
+  }, [syntheticSubgroup, combinedAttributesForGeneration]);
+
+  // Effective descriptions & live validation
+  const effectiveShortDesc = agreeShortDesc ? generatedShortDesc.shortDescription : customShortDesc;
+  const effectiveLongDesc = agreeLongDesc ? generatedLongDesc : customLongDesc;
+
+  const shortValidation = useMemo(() => validateUpperNoAccents(customShortDesc), [customShortDesc]);
+  const longValidation = useMemo(() => validateUpperNoAccents(customLongDesc), [customLongDesc]);
 
   // Real-time duplicate similarity check against existing catalog
   const duplicateWarning = useMemo(() => {
@@ -181,7 +267,7 @@ export const PDMBuilderModal: React.FC<PDMBuilderModalProps> = ({
         {
           specificSubgroupId: activeSpecificSubgroup.id,
           attributes,
-          shortDesc: shortDescResult.shortDescription,
+          shortDesc: effectiveShortDesc,
         },
         item
       );
@@ -201,7 +287,7 @@ export const PDMBuilderModal: React.FC<PDMBuilderModalProps> = ({
       };
     }
     return null;
-  }, [activeSpecificSubgroup, attributes, shortDescResult, existingItems]);
+  }, [activeSpecificSubgroup, attributes, effectiveShortDesc, existingItems]);
 
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -218,46 +304,80 @@ export const PDMBuilderModal: React.FC<PDMBuilderModalProps> = ({
     setImagePreview('https://images.unsplash.com/photo-1581092160607-ee22621dd758?auto=format&fit=crop&w=400&q=80');
   };
 
+  const handleToggleShortAgree = (agree: boolean) => {
+    setAgreeShortDesc(agree);
+    if (!agree && !customShortDesc) {
+      setCustomShortDesc(generatedShortDesc.shortDescription);
+    }
+    setFormError(null);
+  };
+
+  const handleToggleLongAgree = (agree: boolean) => {
+    setAgreeLongDesc(agree);
+    if (!agree && !customLongDesc) {
+      setCustomLongDesc(generatedLongDesc);
+    }
+    setFormError(null);
+  };
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    setFormError(null);
 
-    // Check mandatory fields
-    const missingFields = activeSpecificSubgroup.attributeDefinitions
-      .filter((def: AttributeDefinition) => def.required && !attributes[def.id])
-      .map((def: AttributeDefinition) => def.label);
+    // Validate custom descriptions if user chose "Não, quero corrigir"
+    const finalShort = effectiveShortDesc.trim();
+    if (!finalShort) {
+      setFormError('A Descrição Curta (60c) não pode ficar em branco.');
+      return;
+    }
+    if (finalShort.length > 60) {
+      setFormError('A Descrição Curta não pode ultrapassar 60 caracteres.');
+      return;
+    }
+    if (!agreeShortDesc && !shortValidation.isValid) {
+      setFormError('A Descrição Curta corrigida deve estar totalmente em MAIÚSCULO e sem acentos.');
+      return;
+    }
 
-    if (missingFields.length > 0) {
-      alert(`Por favor preencha os campos obrigatórios: ${missingFields.join(', ')}`);
+    const finalLong = effectiveLongDesc.trim();
+    if (!finalLong) {
+      setFormError('A Descrição Longa (200c) não pode ficar em branco.');
+      return;
+    }
+    if (finalLong.length > 200) {
+      setFormError('A Descrição Longa deve respeitar o limite máximo de 200 caracteres.');
+      return;
+    }
+    if (!agreeLongDesc && !longValidation.isValid) {
+      setFormError('A Descrição Longa corrigida deve estar totalmente em MAIÚSCULO e sem acentos.');
       return;
     }
 
     // Check quotation mandatory fields (conforme governança PremieRpet)
     if (!supplierNameInput.trim()) {
-      alert('O Nome do Fornecedor Cotado no Orçamento é obrigatório.');
+      setFormError('O Nome do Fornecedor Cotado no Orçamento é obrigatório.');
       return;
     }
     if (!quoteNumberInput.trim()) {
-      alert('O Número da Cotação / Orçamento é obrigatório.');
+      setFormError('O Número da Cotação / Orçamento é obrigatório.');
       return;
     }
     const quoteVal = Number(quoteValueInput) || 0;
     if (quoteVal <= 0) {
-      alert('O Valor Estimado do Orçamento (R$) é obrigatório e deve ser maior que R$ 0,00.');
+      setFormError('O Valor Estimado do Orçamento (R$) é obrigatório e deve ser maior que R$ 0,00.');
       return;
     }
     if (!quoteFileName.trim()) {
-      alert('O Anexo / Documento do Orçamento é obrigatório para cadastro de novos itens PDM.');
+      setFormError('O Anexo / Documento do Orçamento é obrigatório para cadastro de novos itens PDM.');
       return;
     }
 
-    const ncm = ncmOverride.trim() || activeSpecificSubgroup.defaultNcm;
-    const unspsc = unspscOverride.trim() || activeSpecificSubgroup.defaultUnspsc;
+    const ncm = ncmOverride.trim() || dynamicSchema.defaultNcm;
 
     const isMaster = currentUserRole === 'MASTER_ADMIN';
-    const status = isMaster 
-      ? 'APPROVED' 
-      : duplicateWarning && duplicateWarning.score >= 85 
-        ? 'FLAGGED_DUPLICATE' 
+    const status =
+      !isMaster && duplicateWarning && duplicateWarning.score >= 85
+        ? 'FLAGGED_DUPLICATE'
         : 'PENDING_REVIEW';
 
     // Determinar Alçadas de Aprovação por Valor:
@@ -307,7 +427,7 @@ export const PDMBuilderModal: React.FC<PDMBuilderModalProps> = ({
       plantaNome: 'Dourado/SP',
       saldoEstoque: 0,
       pontoEncomenda: Number(orderPointInput) || 1,
-      estoqueSegurancaAlmoxarifado: Number(safetyStockInput) || 1,
+      estoqueSegurancaAlmoxarifado: Number(maxStockInput) || 1,
       tempoRessuprimento: Number(leadTimeInput) || 15,
       ultimaEntrada: '',
       ultimaSaida: '',
@@ -317,7 +437,7 @@ export const PDMBuilderModal: React.FC<PDMBuilderModalProps> = ({
       plantaNome: 'Porto Amazonas/PR',
       saldoEstoque: 0,
       pontoEncomenda: Number(orderPointInput) || 1,
-      estoqueSegurancaAlmoxarifado: Number(safetyStockInput) || 1,
+      estoqueSegurancaAlmoxarifado: Number(maxStockInput) || 1,
       tempoRessuprimento: Number(leadTimeInput) || 15,
       ultimaEntrada: '',
       ultimaSaida: '',
@@ -326,7 +446,13 @@ export const PDMBuilderModal: React.FC<PDMBuilderModalProps> = ({
     if (targetEstab === '10' || targetEstab === 'BOTH') establishments['10'] = e10Stock;
     if (targetEstab === '14' || targetEstab === 'BOTH') establishments['14'] = e14Stock;
 
-    const finalNarrative = narrativeInput.trim().slice(0, 200);
+    const savedAttributes: Record<string, string> = { ...attributes };
+    if (hasSpecificManufacturer === 'SIM' && specificManufacturer.trim()) {
+      savedAttributes['fabricante_especifico'] = specificManufacturer.trim();
+    }
+    if (manufacturerRefNumber.trim()) {
+      savedAttributes['referencia_fabricante'] = manufacturerRefNumber.trim();
+    }
 
     const requesterName = isMaster ? 'Master Admin' : `Almoxarife PremieRpet (${currentTenant.code})`;
 
@@ -337,12 +463,12 @@ export const PDMBuilderModal: React.FC<PDMBuilderModalProps> = ({
       nivel1: selectedNivel1,
       nivel2: selectedNivel2,
       nivel3: selectedNivel3,
-      shortDescription: shortDescResult.shortDescription,
-      narrative: finalNarrative,
-      longDescription: finalNarrative ? `${shortDescResult.shortDescription} - ${finalNarrative}` : longDesc,
-      attributes,
+      shortDescription: sanitizeUpperNoAccents(finalShort, 60),
+      narrative: sanitizeUpperNoAccents(finalLong, 200),
+      longDescription: sanitizeUpperNoAccents(finalLong, 200),
+      attributes: savedAttributes,
       ncm,
-      unspsc,
+      unspsc: '',
       baseValue: quoteVal,
       genericImage: imagePreview || undefined,
       status,
@@ -351,15 +477,14 @@ export const PDMBuilderModal: React.FC<PDMBuilderModalProps> = ({
       unitOfMeasure: unitOfMeasureInput.trim() || 'UN',
       leadTimeDays: Number(leadTimeInput) || 15,
       orderPoint: Number(orderPointInput) || 1,
-      safetyStockWarehouse: Number(safetyStockInput) || 1,
+      safetyStockWarehouse: Number(maxStockInput) || 1,
       establishments,
-      totvsPlant: targetEstab === 'BOTH' ? 'Dourado & Paraná' : (targetEstab === '10' ? 'Dourado' : 'Paraná'),
+      totvsPlant: targetEstab === 'BOTH' ? 'Dourado & Paraná' : targetEstab === '10' ? 'Dourado' : 'Paraná',
       requestedByTenantId: isMaster ? undefined : currentTenant.id,
       requestedByTenantName: isMaster ? undefined : currentTenant.name,
       requestedByUser: requesterName,
       duplicateOfId: duplicateWarning ? duplicateWarning.item.id : undefined,
       similarityScore: duplicateWarning ? duplicateWarning.score : undefined,
-      // Orçamento Obrigatório
       quotation: {
         supplierName: supplierNameInput.trim(),
         quoteNumber: quoteNumberInput.trim(),
@@ -369,25 +494,37 @@ export const PDMBuilderModal: React.FC<PDMBuilderModalProps> = ({
         fileDate: new Date().toISOString(),
         notes: quoteNotesInput.trim(),
       },
-      // Esteira de Aprovação por Valor
       approvalWorkflow: {
         requiredTiers,
         currentPendingTier: isMaster ? null : 1,
         estimatedValue: quoteVal,
         steps: approvalSteps,
-        isFullyApproved: isMaster,
+        isFullyApproved: false,
+        stage: isMaster ? 'DELEGATED_TO_ERP_EDITOR' : 'TIER_REVIEW',
+        delegation: isMaster
+          ? {
+              assignedUserId: 'master-creator',
+              assignedUserName: 'Master Admin (Criador)',
+              assignedByUser: 'Master Admin',
+              assignedAt: new Date().toISOString(),
+              unitTenantId: currentTenant.id,
+              unitTenantName: currentTenant.name,
+              notes: 'Cadastro iniciado pelo Master Admin — aguardando inserção do Código TOTVS.',
+            }
+          : undefined,
       },
-      // Trilha de Auditoria Inicial
       changeHistory: [
         {
           id: 'hist-' + Date.now(),
           timestamp: new Date().toISOString(),
           actionType: 'CREATED',
-          actionLabel: 'Solicitação de Cadastro PDM Enviada',
+          actionLabel: isMaster
+            ? 'PDM Gerado pelo Master — Aguardando Código TOTVS'
+            : 'Solicitação de Cadastro PDM Enviada',
           requestedByUser: requesterName,
           requestedByTenantName: currentTenant.name,
-          status: isMaster ? 'APPROVED' : 'PENDING',
-          reason: `Solicitação criada com Orçamento do Fornecedor ${supplierNameInput.trim()} (Cotação ${quoteNumberInput.trim()}, Valor R$ ${quoteVal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}). Alçada requerida: ${requiredTiers.map(t => 'Nível ' + t).join(' + ')}.`,
+          status: 'PENDING',
+          reason: `Solicitação criada com Orçamento do Fornecedor ${supplierNameInput.trim()} (Cotação ${quoteNumberInput.trim()}, Valor R$ ${quoteVal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}). Alçada requerida: ${requiredTiers.map((t) => 'Nível ' + t).join(' + ')}.`,
           changes: [],
         },
       ],
@@ -402,12 +539,11 @@ export const PDMBuilderModal: React.FC<PDMBuilderModalProps> = ({
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4">
       <div className="relative w-full max-w-4xl bg-white border border-slate-200 rounded-2xl shadow-2xl flex flex-col max-h-[92vh] overflow-hidden text-slate-800">
-        
-        {/* MODAL HEADER (LIGHT THEME) */}
+        {/* MODAL HEADER */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 bg-slate-50">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-emerald-100 text-emerald-800 flex items-center justify-center">
-              <Sparkles className="w-5 h-5 text-emerald-700" />
+              <DogPawIcon className="w-5 h-5 text-emerald-700" />
             </div>
             <div>
               <h2 className="text-base font-bold text-slate-900 flex items-center gap-2">
@@ -437,6 +573,16 @@ export const PDMBuilderModal: React.FC<PDMBuilderModalProps> = ({
 
         {/* MODAL BODY */}
         <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-6 space-y-6">
+          {/* VALIDATION ERROR BANNER */}
+          {formError && (
+            <div className="p-3.5 rounded-xl bg-rose-50 border border-rose-300 flex items-start gap-2.5 text-rose-900 text-xs">
+              <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+              <div>
+                <strong className="font-bold block">Verifique antes de enviar:</strong>
+                <span>{formError}</span>
+              </div>
+            </div>
+          )}
 
           {/* DUPLICATE WARNING CALLOUT */}
           {duplicateWarning && (
@@ -448,11 +594,13 @@ export const PDMBuilderModal: React.FC<PDMBuilderModalProps> = ({
                 </div>
                 <p className="text-slate-700">
                   Um item equivalente já está homologado no TOTVS:{' '}
-                  <span className="font-mono text-emerald-900 font-bold">{duplicateWarning.item.totvsCode || duplicateWarning.item.pdmCode}</span> -{' '}
-                  <span className="italic font-medium">{duplicateWarning.item.shortDescription}</span>
+                  <span className="font-mono text-emerald-900 font-bold">
+                    {duplicateWarning.item.totvsCode || duplicateWarning.item.pdmCode}
+                  </span>{' '}
+                  - <span className="italic font-medium">{duplicateWarning.item.shortDescription}</span>
                 </p>
                 <div className="text-[11px] text-amber-800">
-                  Ao submeter, este cadastro cairá na Fila de Saneamento sinalizado para validação do Master Admin.
+                  Ao submeter, este cadastro cairá na Fila de Governança sinalizado para análise.
                 </div>
               </div>
             </div>
@@ -474,12 +622,8 @@ export const PDMBuilderModal: React.FC<PDMBuilderModalProps> = ({
               {/* Nível 1 */}
               <div>
                 <div className="flex items-center justify-between mb-1">
-                  <label className="text-[11px] font-semibold text-slate-700">
-                    Nível 1 · Grupo Macro *
-                  </label>
-                  <span className="text-[10px] font-mono text-slate-400">
-                    {niveis1Options.length} grupos
-                  </span>
+                  <label className="text-[11px] font-semibold text-slate-700">Nível 1 · Grupo Macro *</label>
+                  <span className="text-[10px] font-mono text-slate-400">{niveis1Options.length} grupos</span>
                 </div>
                 <select
                   value={selectedNivel1}
@@ -497,12 +641,8 @@ export const PDMBuilderModal: React.FC<PDMBuilderModalProps> = ({
               {/* Nível 2 */}
               <div>
                 <div className="flex items-center justify-between mb-1">
-                  <label className="text-[11px] font-semibold text-slate-700">
-                    Nível 2 · Subgrupo / Família *
-                  </label>
-                  <span className="text-[10px] font-mono text-slate-400">
-                    {niveis2Options.length} subgrupos
-                  </span>
+                  <label className="text-[11px] font-semibold text-slate-700">Nível 2 · Subgrupo / Família *</label>
+                  <span className="text-[10px] font-mono text-slate-400">{niveis2Options.length} subgrupos</span>
                 </div>
                 <select
                   value={selectedNivel2}
@@ -520,12 +660,8 @@ export const PDMBuilderModal: React.FC<PDMBuilderModalProps> = ({
               {/* Nível 3 */}
               <div>
                 <div className="flex items-center justify-between mb-1">
-                  <label className="text-[11px] font-semibold text-slate-700">
-                    Nível 3 · Subgrupo Específico *
-                  </label>
-                  <span className="text-[10px] font-mono text-slate-400">
-                    {niveis3Options.length} opções
-                  </span>
+                  <label className="text-[11px] font-semibold text-slate-700">Nível 3 · Subgrupo Específico *</label>
+                  <span className="text-[10px] font-mono text-slate-400">{niveis3Options.length} opções</span>
                 </div>
                 <select
                   value={selectedNivel3}
@@ -542,28 +678,25 @@ export const PDMBuilderModal: React.FC<PDMBuilderModalProps> = ({
             </div>
           </div>
 
-          {/* 2. DYNAMIC ATTRIBUTES FORM */}
-          <div className="space-y-3 p-4 rounded-xl bg-slate-50 border border-slate-200">
-            <div className="flex items-center justify-between">
+          {/* 2. DYNAMIC ATTRIBUTES FORM (OPTATIVO POR NÍVEIS 1, 2 E 3) */}
+          <div className="space-y-4 p-4 rounded-xl bg-slate-50 border border-slate-200">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
               <div className="text-xs font-mono font-bold uppercase tracking-wider text-emerald-800 flex items-center gap-2">
                 <FileText className="w-4 h-4 text-emerald-700" />
-                <span>2. Dicionário de Atributos Parametrizados</span>
+                <span>2. Dicionário de Atributos Parametrizados ({dynamicSchema.categoryLabel})</span>
               </div>
               <span className="text-[11px] text-slate-500 font-mono">
-                {activeSpecificSubgroup.attributeDefinitions.length} atributos disponíveis
+                {dynamicSchema.attributes.length} atributos sugeridos · Preenchimento opcional
               </span>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
-              {activeSpecificSubgroup.attributeDefinitions.map((attrDef: AttributeDefinition) => (
+              {dynamicSchema.attributes.map((attrDef: AttributeDefinition) => (
                 <div key={attrDef.id} className="space-y-1">
                   <label className="block text-[11px] font-semibold text-slate-700">
                     {attrDef.label}
-                    {attrDef.required && <span className="text-rose-600 ml-0.5">*</span>}
                     {attrDef.unit && (
-                      <span className="ml-1 text-[10px] text-slate-400 font-mono">
-                        ({attrDef.unit})
-                      </span>
+                      <span className="ml-1 text-[10px] text-slate-400 font-mono">({attrDef.unit})</span>
                     )}
                   </label>
 
@@ -573,7 +706,7 @@ export const PDMBuilderModal: React.FC<PDMBuilderModalProps> = ({
                       onChange={(e) => handleAttributeChange(attrDef.id, e.target.value)}
                       className="w-full text-xs bg-white border border-slate-200 rounded-xl px-3 py-2 text-slate-900 focus:outline-none focus:border-emerald-600 focus:ring-2 focus:ring-emerald-100 font-medium shadow-2xs"
                     >
-                      <option value="">Selecione...</option>
+                      <option value="">Opcional / Selecionar...</option>
                       {attrDef.options?.map((opt: string) => (
                         <option key={opt} value={opt}>
                           {opt}
@@ -584,7 +717,7 @@ export const PDMBuilderModal: React.FC<PDMBuilderModalProps> = ({
                     <input
                       type={attrDef.type === 'number' ? 'number' : 'text'}
                       step="any"
-                      placeholder={attrDef.placeholder || ''}
+                      placeholder={attrDef.placeholder || 'Opcional'}
                       value={attributes[attrDef.id] || ''}
                       onChange={(e) => handleAttributeChange(attrDef.id, e.target.value)}
                       className="w-full text-xs bg-white border border-slate-200 rounded-xl px-3 py-2 text-slate-900 placeholder-slate-400 focus:outline-none focus:border-emerald-600 focus:ring-2 focus:ring-emerald-100 font-mono shadow-2xs"
@@ -593,144 +726,348 @@ export const PDMBuilderModal: React.FC<PDMBuilderModalProps> = ({
                 </div>
               ))}
             </div>
+
+            {/* Fabricante específico & Nº de referência fabricante (Opcional) */}
+            <div className="pt-3 border-t border-slate-200 grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div className="p-3 rounded-xl bg-white border border-slate-200 space-y-2">
+                <label className="text-[11px] font-semibold text-slate-700 flex items-center gap-1.5">
+                  <Factory className="w-3.5 h-3.5 text-slate-500" />
+                  <span>Fabricante específico? Se sim, qual?</span>
+                </label>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setHasSpecificManufacturer('NAO');
+                      setSpecificManufacturer('');
+                    }}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors ${
+                      hasSpecificManufacturer === 'NAO'
+                        ? 'bg-slate-900 text-white border-slate-900'
+                        : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+                    }`}
+                  >
+                    Não
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setHasSpecificManufacturer('SIM')}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors ${
+                      hasSpecificManufacturer === 'SIM'
+                        ? 'bg-emerald-700 text-white border-emerald-700'
+                        : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+                    }`}
+                  >
+                    Sim
+                  </button>
+                  {hasSpecificManufacturer === 'SIM' && (
+                    <input
+                      type="text"
+                      placeholder="Ex: SKF, WEG, FESTO, SMC, SEW..."
+                      value={specificManufacturer}
+                      onChange={(e) => setSpecificManufacturer(e.target.value)}
+                      className="flex-1 text-xs bg-slate-50 border border-emerald-300 rounded-lg px-2.5 py-1.5 text-slate-900 font-mono focus:outline-none focus:border-emerald-600 focus:bg-white"
+                    />
+                  )}
+                </div>
+              </div>
+
+              <div className="p-3 rounded-xl bg-white border border-slate-200 space-y-2">
+                <label className="text-[11px] font-semibold text-slate-700 flex items-center gap-1.5">
+                  <Hash className="w-3.5 h-3.5 text-slate-500" />
+                  <span>Nº de referência fabricante</span>
+                </label>
+                <input
+                  type="text"
+                  placeholder="Ex: 6205-2RSH/C3, ADN-50-100-A-P-A (opcional)"
+                  value={manufacturerRefNumber}
+                  onChange={(e) => setManufacturerRefNumber(e.target.value)}
+                  className="w-full text-xs bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5 text-slate-900 placeholder-slate-400 font-mono focus:outline-none focus:border-emerald-600 focus:bg-white"
+                />
+              </div>
+            </div>
           </div>
 
           {/* 3. REAL-TIME NARRATIVE BUILDER PREVIEWS */}
           <div className="space-y-4 p-4 rounded-xl bg-emerald-50/40 border border-emerald-200">
             <div className="flex items-center justify-between">
               <div className="text-xs font-mono font-bold uppercase tracking-wider text-emerald-800 flex items-center gap-2">
-                <Sparkles className="w-4 h-4 text-emerald-700" />
+                <DogPawIcon className="w-4 h-4 text-emerald-700" />
                 <span>3. Gerador em Tempo Real de Descrição ERP & PDM</span>
               </div>
               <span className="text-[11px] text-emerald-700 font-mono font-semibold">Regras Normativas TOTVS</span>
             </div>
 
-            {/* ERP Short Description (60 chars) */}
-            <div className="p-3.5 rounded-xl bg-white border border-emerald-200 space-y-1.5 shadow-2xs">
-              <div className="flex items-center justify-between text-xs">
+            {/* ERP Short Description (60 chars) + Concorda com a descrição */}
+            <div className="p-3.5 rounded-xl bg-white border border-emerald-200 space-y-2.5 shadow-2xs">
+              <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
                 <span className="font-bold text-slate-800 flex items-center gap-1.5">
-                  Descrição Curta ERP (Máximo 60 caracteres, sem diacríticos)
+                  Descrição Curta ERP (Máximo 60 caracteres, sem acentos, caixa alta)
                   <Info className="w-3.5 h-3.5 text-slate-400" />
                 </span>
                 <div className="flex items-center gap-2 font-mono">
                   <span
                     className={`text-[11px] font-bold px-2 py-0.5 rounded-full ${
-                      shortDescResult.charCount <= 60
+                      effectiveShortDesc.length <= 60
                         ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
                         : 'bg-rose-100 text-rose-800 border border-rose-200'
                     }`}
                   >
-                    {shortDescResult.charCount} / 60 caracteres
+                    {effectiveShortDesc.length} / 60 caracteres
                   </span>
-                  {shortDescResult.isTruncated && (
+                  {agreeShortDesc && generatedShortDesc.isTruncated && (
                     <span className="text-[10px] text-amber-700 font-bold">Truncado</span>
                   )}
                 </div>
               </div>
 
               <div className="p-2.5 rounded-lg bg-slate-50 border border-slate-200 font-mono text-xs text-emerald-950 font-bold tracking-wide select-all break-all">
-                {shortDescResult.shortDescription || 'AGUARDANDO PREENCHIMENTO DOS ATRIBUTOS...'}
+                {generatedShortDesc.shortDescription || 'AGUARDANDO SELEÇÃO DOS NÍVEIS OU ATRIBUTOS...'}
               </div>
-              <p className="text-[10px] text-slate-500">
-                Padrão caixa alta, abreviações técnicas universais, pronto para carga direta via BAPI/IDoc TOTVS.
-              </p>
+
+              {/* Concorda com a descrição? */}
+              <div className="flex flex-wrap items-center gap-4 pt-1 text-xs">
+                <span className="font-semibold text-slate-700">Concorda com a descrição?</span>
+                <label className="inline-flex items-center gap-1.5 cursor-pointer font-semibold text-slate-800">
+                  <input
+                    type="radio"
+                    name="agreeShortDesc"
+                    checked={agreeShortDesc}
+                    onChange={() => handleToggleShortAgree(true)}
+                    className="accent-emerald-700"
+                  />
+                  <span>Sim</span>
+                </label>
+                <label className="inline-flex items-center gap-1.5 cursor-pointer font-semibold text-slate-800">
+                  <input
+                    type="radio"
+                    name="agreeShortDesc"
+                    checked={!agreeShortDesc}
+                    onChange={() => handleToggleShortAgree(false)}
+                    className="accent-amber-600"
+                  />
+                  <span>Não, quero corrigir</span>
+                </label>
+              </div>
+
+              {!agreeShortDesc && (
+                <div className="space-y-1.5 pt-1">
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      maxLength={60}
+                      value={customShortDesc}
+                      onChange={(e) => setCustomShortDesc(e.target.value)}
+                      placeholder="Digite a descrição curta em MAIÚSCULO e sem acentos (máx. 60c)..."
+                      className={`flex-1 text-xs bg-white border rounded-xl px-3 py-2 font-mono font-bold focus:outline-none focus:ring-2 ${
+                        shortValidation.isValid
+                          ? 'border-emerald-300 text-slate-900 focus:border-emerald-600 focus:ring-emerald-100'
+                          : 'border-rose-400 text-rose-900 focus:border-rose-600 focus:ring-rose-100'
+                      }`}
+                    />
+                    {!shortValidation.isValid && (
+                      <button
+                        type="button"
+                        onClick={() => setCustomShortDesc(sanitizeUpperNoAccents(customShortDesc, 60))}
+                        className="inline-flex items-center gap-1 px-2.5 py-2 rounded-xl bg-amber-100 hover:bg-amber-200 text-amber-900 border border-amber-300 text-[11px] font-bold shrink-0"
+                      >
+                        <Wand2 className="w-3.5 h-3.5" />
+                        <span>Corrigir padrão</span>
+                      </button>
+                    )}
+                  </div>
+                  {!shortValidation.isValid ? (
+                    <p className="text-[11px] font-semibold text-rose-700 flex items-center gap-1">
+                      <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                      <span>
+                        Atenção:{' '}
+                        {[
+                          shortValidation.hasAccents ? 'possui acentuação' : '',
+                          shortValidation.hasLowercase ? 'possui caracteres minúsculos' : '',
+                        ]
+                          .filter(Boolean)
+                          .join(' e ')}
+                        . Remova acentos e utilize apenas letras MAIÚSCULAS.
+                      </span>
+                    </p>
+                  ) : (
+                    <p className="text-[11px] font-semibold text-emerald-700 flex items-center gap-1">
+                      <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+                      <span>Descrição validada: sem acentos e 100% em maiúsculo.</span>
+                    </p>
+                  )}
+                </div>
+              )}
             </div>
 
-            {/* Technical Long Description */}
-            <div className="p-3.5 rounded-xl bg-white border border-emerald-200 space-y-1.5 shadow-2xs">
-              <span className="block font-bold text-xs text-slate-800">
-                Descrição Longa Técnica (Engenharia & Confiabilidade)
-              </span>
-              <div className="p-2.5 rounded-lg bg-slate-50 border border-slate-200 text-xs text-slate-700 leading-relaxed font-mono select-all">
-                {longDesc}
+            {/* Technical Long Description (200 chars) + Concorda com a descrição */}
+            <div className="p-3.5 rounded-xl bg-white border border-emerald-200 space-y-2.5 shadow-2xs">
+              <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                <span className="font-bold text-slate-800">
+                  Descrição Longa Técnica (Engenharia & Narrativa TOTVS — Máximo 200 caracteres)
+                </span>
+                <span
+                  className={`font-mono text-[11px] font-bold px-2 py-0.5 rounded-full ${
+                    effectiveLongDesc.length <= 200
+                      ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                      : 'bg-rose-100 text-rose-800 border border-rose-200'
+                  }`}
+                >
+                  {effectiveLongDesc.length} / 200 caracteres
+                </span>
               </div>
+
+              <div className="p-2.5 rounded-lg bg-slate-50 border border-slate-200 text-xs text-slate-700 leading-relaxed font-mono select-all break-words">
+                {generatedLongDesc}
+              </div>
+
+              {/* Concorda com a descrição? */}
+              <div className="flex flex-wrap items-center gap-4 pt-1 text-xs">
+                <span className="font-semibold text-slate-700">Concorda com a descrição?</span>
+                <label className="inline-flex items-center gap-1.5 cursor-pointer font-semibold text-slate-800">
+                  <input
+                    type="radio"
+                    name="agreeLongDesc"
+                    checked={agreeLongDesc}
+                    onChange={() => handleToggleLongAgree(true)}
+                    className="accent-emerald-700"
+                  />
+                  <span>Sim</span>
+                </label>
+                <label className="inline-flex items-center gap-1.5 cursor-pointer font-semibold text-slate-800">
+                  <input
+                    type="radio"
+                    name="agreeLongDesc"
+                    checked={!agreeLongDesc}
+                    onChange={() => handleToggleLongAgree(false)}
+                    className="accent-amber-600"
+                  />
+                  <span>Não, quero corrigir</span>
+                </label>
+              </div>
+
+              {!agreeLongDesc && (
+                <div className="space-y-1.5 pt-1">
+                  <div className="flex items-start gap-2">
+                    <textarea
+                      rows={2}
+                      maxLength={200}
+                      value={customLongDesc}
+                      onChange={(e) => setCustomLongDesc(e.target.value)}
+                      placeholder="Digite a descrição longa em MAIÚSCULO, sem acentos, respeitando o limite de 200 caracteres..."
+                      className={`flex-1 text-xs bg-white border rounded-xl p-2.5 font-mono leading-relaxed focus:outline-none focus:ring-2 ${
+                        longValidation.isValid
+                          ? 'border-emerald-300 text-slate-900 focus:border-emerald-600 focus:ring-emerald-100'
+                          : 'border-rose-400 text-rose-900 focus:border-rose-600 focus:ring-rose-100'
+                      }`}
+                    />
+                    {!longValidation.isValid && (
+                      <button
+                        type="button"
+                        onClick={() => setCustomLongDesc(sanitizeUpperNoAccents(customLongDesc, 200))}
+                        className="inline-flex items-center gap-1 px-2.5 py-2 rounded-xl bg-amber-100 hover:bg-amber-200 text-amber-900 border border-amber-300 text-[11px] font-bold shrink-0"
+                      >
+                        <Wand2 className="w-3.5 h-3.5" />
+                        <span>Corrigir padrão</span>
+                      </button>
+                    )}
+                  </div>
+                  {!longValidation.isValid ? (
+                    <p className="text-[11px] font-semibold text-rose-700 flex items-center gap-1">
+                      <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                      <span>
+                        Atenção:{' '}
+                        {[
+                          longValidation.hasAccents ? 'possui acentuação' : '',
+                          longValidation.hasLowercase ? 'possui caracteres minúsculos' : '',
+                        ]
+                          .filter(Boolean)
+                          .join(' e ')}
+                        . Remova acentos e utilize apenas letras MAIÚSCULAS (máx. 200c).
+                      </span>
+                    </p>
+                  ) : (
+                    <p className="text-[11px] font-semibold text-emerald-700 flex items-center gap-1">
+                      <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+                      <span>Descrição longa validada: sem acentos, em maiúsculo e dentro de 200 caracteres.</span>
+                    </p>
+                  )}
+                </div>
+              )}
             </div>
 
-            {/* Fiscal & TOTVS Family classification */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
+            {/* Família TOTVS & Classificação NCM (Sem UNSPSC) */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-1">
+              <div className="space-y-1.5">
+                <label className="block text-[11px] font-semibold text-slate-700">Família TOTVS</label>
+                <div className="flex items-center gap-2">
+                  {AVAILABLE_TOTVS_FAMILIES.map((fam) => {
+                    const isSelected = totvsFamilyInput === fam.code;
+                    return (
+                      <button
+                        key={fam.code}
+                        type="button"
+                        onClick={() => setTotvsFamilyInput(fam.code)}
+                        className={`flex-1 py-2 px-3 rounded-xl border font-mono text-xs font-bold transition-all ${
+                          isSelected
+                            ? 'bg-emerald-700 text-white border-emerald-700 shadow-2xs'
+                            : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                        }`}
+                      >
+                        {fam.code}
+                      </button>
+                    );
+                  })}
+                </div>
+                <div className="p-2.5 rounded-lg bg-white border border-slate-200 text-[11px] text-slate-600 space-y-0.5 font-mono">
+                  <div>
+                    <strong className="text-slate-800">5040</strong> - itens gerais e nacionalizados
+                  </div>
+                  <div>
+                    <strong className="text-slate-800">5060</strong> - Itens fabricante originais e/ou importação
+                  </div>
+                  <div>
+                    <strong className="text-slate-800">5070</strong> - Itens reparados
+                  </div>
+                </div>
+              </div>
+
               <div>
-                <label className="block text-[11px] font-semibold text-slate-600 mb-1">
-                  Família TOTVS Protheus
+                <label className="block text-[11px] font-semibold text-slate-700 mb-1.5">
+                  Classificação NCM
                 </label>
                 <input
                   type="text"
-                  value={totvsFamilyInput}
-                  onChange={(e) => setTotvsFamilyInput(e.target.value)}
-                  className="w-full text-xs bg-white border border-slate-200 rounded-xl px-3 py-2 text-slate-900 font-mono focus:outline-none focus:border-emerald-600 focus:ring-2 focus:ring-emerald-100"
-                />
-              </div>
-
-              <div>
-                <label className="block text-[11px] font-semibold text-slate-600 mb-1">
-                  Classificação Fiscal NCM
-                </label>
-                <input
-                  type="text"
-                  placeholder={activeSpecificSubgroup.defaultNcm}
+                  placeholder={dynamicSchema.defaultNcm}
                   value={ncmOverride}
                   onChange={(e) => setNcmOverride(e.target.value)}
                   className="w-full text-xs bg-white border border-slate-200 rounded-xl px-3 py-2 text-slate-900 font-mono focus:outline-none focus:border-emerald-600 focus:ring-2 focus:ring-emerald-100"
                 />
-              </div>
-
-              <div>
-                <label className="block text-[11px] font-semibold text-slate-600 mb-1">
-                  Código UNSPSC Global
-                </label>
-                <input
-                  type="text"
-                  placeholder={activeSpecificSubgroup.defaultUnspsc}
-                  value={unspscOverride}
-                  onChange={(e) => setUnspscOverride(e.target.value)}
-                  className="w-full text-xs bg-white border border-slate-200 rounded-xl px-3 py-2 text-slate-900 font-mono focus:outline-none focus:border-emerald-600 focus:ring-2 focus:ring-emerald-100"
-                />
+                <p className="text-[10px] text-slate-500 mt-1.5">
+                  Sugestão automática pela classificação selecionada:{' '}
+                  <span className="font-mono font-bold text-slate-700">{dynamicSchema.defaultNcm}</span>
+                </p>
               </div>
             </div>
           </div>
 
-          {/* 3.5. TOTVS CE0348 ESPECIFICAÇÕES & ESTOQUE */}
+          {/* 4. PARÂMETROS DE ALMOXARIFADO E RESSUPRIMENTO */}
           <div className="p-4 rounded-xl bg-emerald-50/40 border border-emerald-200 space-y-3.5">
             <div className="flex items-center justify-between">
               <div className="text-xs font-mono font-bold uppercase tracking-wider text-emerald-900 flex items-center gap-2">
                 <Sliders className="w-4 h-4 text-emerald-700" />
-                <span>3.5. Parâmetros de Almoxarifado & Narrativa TOTVS (Base CE0348)</span>
+                <span>4. Parâmetros de Almoxarifado e ressuprimento</span>
               </div>
               <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300">
-                Padrão Protheus Estab. 10 & 14
+                Padrão TOTVS Estab. 10 & 14
               </span>
             </div>
 
-            {/* Narrativa do Item (Coluna AF - Até 200 caracteres) */}
-            <div className="space-y-1">
-              <div className="flex items-center justify-between text-[11px]">
-                <label className="font-semibold text-slate-800">
-                  Narrativa do Item (Coluna AF - Limite estrito de 200 caracteres):
-                </label>
-                <span className={`font-mono font-bold ${
-                  narrativeInput.length > 200 ? 'text-rose-600' : 'text-emerald-800'
-                }`}>
-                  {narrativeInput.length} / 200 caracteres
-                </span>
-              </div>
-              <textarea
-                rows={2}
-                maxLength={200}
-                value={narrativeInput}
-                onChange={(e) => setNarrativeInput(e.target.value)}
-                placeholder="Ex: Part Number OEM 6205-2RSH/C3 SKF, diâmetro 25mm, aplicação esteira linha de secagem..."
-                className="w-full text-xs bg-white border border-emerald-200 rounded-xl p-2.5 text-slate-900 font-mono placeholder-slate-400 focus:outline-none focus:border-emerald-600 focus:ring-2 focus:ring-emerald-100 shadow-2xs leading-relaxed"
-              />
-              <p className="text-[10px] text-slate-500">
-                Utilizada como complemento da descrição no TOTVS. Indexada para pesquisa inteligente <strong>E/OU</strong> nas unidades.
-              </p>
-            </div>
-
-            {/* Grid com Lead Time, Ponto Encomenda, Estoque de Segurança e Unidade */}
+            {/* Grid com Tempo de ressuprimento, Estoque mínimo sugerido, Estoque máximo sugerido e Unidade de medida do item */}
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 pt-1">
-              {/* Tempo Ressuprimento (Lead Time em dias - Col K) */}
               <div>
                 <label className="block text-[11px] font-semibold text-slate-700 mb-1">
-                  Tempo Ressuprimento (Col K)
+                  Tempo de ressuprimento
                 </label>
                 <div className="relative">
                   <input
@@ -740,16 +1077,13 @@ export const PDMBuilderModal: React.FC<PDMBuilderModalProps> = ({
                     onChange={(e) => setLeadTimeInput(Number(e.target.value))}
                     className="w-full text-xs bg-white border border-slate-200 rounded-xl px-3 py-2 pr-12 text-slate-900 font-mono focus:outline-none focus:border-emerald-600 focus:ring-2 focus:ring-emerald-100 shadow-2xs"
                   />
-                  <span className="absolute right-3 top-2 text-[10px] text-slate-400 font-mono">
-                    dias
-                  </span>
+                  <span className="absolute right-3 top-2 text-[10px] text-slate-400 font-mono">dias</span>
                 </div>
               </div>
 
-              {/* Ponto de Encomenda (Lote mínimo para compra - Col H) */}
               <div>
-                <label className="block text-[11px] font-semibold text-slate-700 mb-1" title="Lote mínimo de reposição">
-                  Ponto Encomenda (Col H)
+                <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+                  Estoque mínimo sugerido
                 </label>
                 <input
                   type="number"
@@ -760,24 +1094,22 @@ export const PDMBuilderModal: React.FC<PDMBuilderModalProps> = ({
                 />
               </div>
 
-              {/* Estoque de segurança almoxarifado (Col I) */}
               <div>
                 <label className="block text-[11px] font-semibold text-slate-700 mb-1">
-                  Estoque de Segurança (Col I)
+                  Estoque máximo sugerido
                 </label>
                 <input
                   type="number"
                   min={0}
-                  value={safetyStockInput}
-                  onChange={(e) => setSafetyStockInput(Number(e.target.value))}
+                  value={maxStockInput}
+                  onChange={(e) => setMaxStockInput(Number(e.target.value))}
                   className="w-full text-xs bg-white border border-slate-200 rounded-xl px-3 py-2 text-slate-900 font-mono focus:outline-none focus:border-emerald-600 focus:ring-2 focus:ring-emerald-100 shadow-2xs"
                 />
               </div>
 
-              {/* Unidade de Medida (Col D) */}
               <div>
                 <label className="block text-[11px] font-semibold text-slate-700 mb-1">
-                  Unidade de Medida (Col D)
+                  Unidade de medida do item
                 </label>
                 <select
                   value={unitOfMeasureInput}
@@ -788,6 +1120,7 @@ export const PDMBuilderModal: React.FC<PDMBuilderModalProps> = ({
                   <option value="PC">PC - Peça</option>
                   <option value="KG">KG - Quilograma</option>
                   <option value="MT">MT - Metro</option>
+                  <option value="FT">FT - Pés</option>
                   <option value="LT">LT - Litro</option>
                   <option value="CJ">CJ - Conjunto</option>
                   <option value="JG">JG - Jogo</option>
@@ -796,10 +1129,10 @@ export const PDMBuilderModal: React.FC<PDMBuilderModalProps> = ({
               </div>
             </div>
 
-            {/* Estabelecimento de Destino */}
+            {/* Estabelecimento de consumo */}
             <div className="pt-1">
               <label className="block text-[11px] font-semibold text-slate-700 mb-1">
-                Estabelecimento de Destino PremieRpet (Coluna E)
+                Estabelecimento de consumo
               </label>
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                 <button
@@ -844,12 +1177,12 @@ export const PDMBuilderModal: React.FC<PDMBuilderModalProps> = ({
             </div>
           </div>
 
-          {/* 3.6. ORÇAMENTO & PROPOSTA COMERCIAL DO FORNECEDOR (OBRIGATÓRIO) */}
+          {/* 5. ORÇAMENTO & PROPOSTA COMERCIAL DO FORNECEDOR (OBRIGATÓRIO) */}
           <div className="p-4 rounded-xl bg-blue-50/50 border-2 border-blue-200 space-y-3.5 shadow-2xs">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
               <div className="text-xs font-mono font-bold uppercase tracking-wider text-blue-950 flex items-center gap-2">
                 <DollarSign className="w-4 h-4 text-blue-700" />
-                <span>3.6. Orçamento & Proposta Comercial (Obrigatório Conforme Governança)</span>
+                <span>5. Orçamento & Proposta Comercial (Obrigatório Conforme Governança)</span>
               </div>
               <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-blue-100 text-blue-800 border border-blue-300 w-fit">
                 Anexo & Alçadas por Valor
@@ -859,9 +1192,7 @@ export const PDMBuilderModal: React.FC<PDMBuilderModalProps> = ({
             {/* ALÇADAS DE APROVAÇÃO BANNER */}
             <div className="p-3 rounded-xl bg-white border border-blue-200 space-y-2">
               <div className="flex items-center justify-between text-xs">
-                <span className="font-bold text-slate-800">
-                  Matriz Corporativa de Alçadas de Aprovação PDM:
-                </span>
+                <span className="font-bold text-slate-800">Matriz Corporativa de Alçadas de Aprovação PDM:</span>
                 <span className="text-[11px] font-mono font-bold text-blue-900">
                   {Number(quoteValueInput) > 10000 ? (
                     <span className="text-purple-700 bg-purple-50 px-2 py-0.5 rounded border border-purple-200">
@@ -880,25 +1211,37 @@ export const PDMBuilderModal: React.FC<PDMBuilderModalProps> = ({
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-[11px] font-mono">
-                <div className={`p-2 rounded-lg border ${
-                  Number(quoteValueInput) <= 1000 ? 'bg-emerald-50 border-emerald-300 font-bold text-emerald-950 ring-1 ring-emerald-300' : 'bg-slate-50 border-slate-200 text-slate-600'
-                }`}>
+                <div
+                  className={`p-2 rounded-lg border ${
+                    Number(quoteValueInput) <= 1000
+                      ? 'bg-emerald-50 border-emerald-300 font-bold text-emerald-950 ring-1 ring-emerald-300'
+                      : 'bg-slate-50 border-slate-200 text-slate-600'
+                  }`}
+                >
                   <span className="block text-[10px] text-slate-500 uppercase font-sans">Alçada 1</span>
                   <span>Até R$ 1.000,00</span>
                   <span className="block text-[10px] font-sans font-normal text-slate-500">Aprovador Nível 1</span>
                 </div>
 
-                <div className={`p-2 rounded-lg border ${
-                  Number(quoteValueInput) > 1000 && Number(quoteValueInput) <= 10000 ? 'bg-blue-50 border-blue-300 font-bold text-blue-950 ring-1 ring-blue-300' : 'bg-slate-50 border-slate-200 text-slate-600'
-                }`}>
+                <div
+                  className={`p-2 rounded-lg border ${
+                    Number(quoteValueInput) > 1000 && Number(quoteValueInput) <= 10000
+                      ? 'bg-blue-50 border-blue-300 font-bold text-blue-950 ring-1 ring-blue-300'
+                      : 'bg-slate-50 border-slate-200 text-slate-600'
+                  }`}
+                >
                   <span className="block text-[10px] text-slate-500 uppercase font-sans">Alçada 2</span>
                   <span>R$ 1.000,01 a R$ 10.000,00</span>
                   <span className="block text-[10px] font-sans font-normal text-slate-500">Nível 1 + Nível 2</span>
                 </div>
 
-                <div className={`p-2 rounded-lg border ${
-                  Number(quoteValueInput) > 10000 ? 'bg-purple-50 border-purple-300 font-bold text-purple-950 ring-1 ring-purple-300' : 'bg-slate-50 border-slate-200 text-slate-600'
-                }`}>
+                <div
+                  className={`p-2 rounded-lg border ${
+                    Number(quoteValueInput) > 10000
+                      ? 'bg-purple-50 border-purple-300 font-bold text-purple-950 ring-1 ring-purple-300'
+                      : 'bg-slate-50 border-slate-200 text-slate-600'
+                  }`}
+                >
                   <span className="block text-[10px] text-slate-500 uppercase font-sans">Alçada 3</span>
                   <span>Acima de R$ 10.000,00</span>
                   <span className="block text-[10px] font-sans font-normal text-slate-500">Nível 1 + Nível 2 + Nível 3</span>
@@ -941,9 +1284,7 @@ export const PDMBuilderModal: React.FC<PDMBuilderModalProps> = ({
                   Valor Estimado Unitário (R$) <span className="text-rose-500">*</span>
                 </label>
                 <div className="relative">
-                  <span className="absolute left-3 top-2 text-xs font-mono font-bold text-slate-500">
-                    R$
-                  </span>
+                  <span className="absolute left-3 top-2 text-xs font-mono font-bold text-slate-500">R$</span>
                   <input
                     type="number"
                     min={0.01}
@@ -995,21 +1336,17 @@ export const PDMBuilderModal: React.FC<PDMBuilderModalProps> = ({
             </div>
           </div>
 
-          {/* 4. IMAGES & OBSERVATIONS */}
+          {/* 6. IMAGES & OBSERVATIONS */}
           <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-3">
             <div className="text-xs font-mono font-bold uppercase tracking-wider text-emerald-800 flex items-center gap-2">
               <ImageIcon className="w-4 h-4 text-emerald-700" />
-              <span>4. Imagem Técnica / Foto do Equipamento</span>
+              <span>6. Imagem Técnica / Foto do Equipamento</span>
             </div>
 
             <div className="flex flex-col sm:flex-row items-center gap-4">
               {imagePreview ? (
                 <div className="relative w-28 h-28 rounded-xl overflow-hidden border border-slate-300 bg-white shrink-0 shadow-xs">
-                  <img
-                    src={imagePreview}
-                    alt="Preview técnico"
-                    className="w-full h-full object-cover"
-                  />
+                  <img src={imagePreview} alt="Preview técnico" className="w-full h-full object-cover" />
                   <button
                     type="button"
                     onClick={() => setImagePreview(null)}
@@ -1030,12 +1367,7 @@ export const PDMBuilderModal: React.FC<PDMBuilderModalProps> = ({
                   <label className="cursor-pointer flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 text-xs font-semibold transition-colors shadow-2xs">
                     <Upload className="w-3.5 h-3.5" />
                     <span>Upload Foto do Almoxarifado</span>
-                    <input
-                      type="file"
-                      accept="image/*"
-                      onChange={handleImageUpload}
-                      className="hidden"
-                    />
+                    <input type="file" accept="image/*" onChange={handleImageUpload} className="hidden" />
                   </label>
 
                   <button
@@ -1048,12 +1380,11 @@ export const PDMBuilderModal: React.FC<PDMBuilderModalProps> = ({
                   </button>
                 </div>
                 <p className="text-[11px] text-slate-500">
-                  Fotos com placa de identificação do motor, bomba ou código gravado facilitam a homologação pelo Master.
+                  Fotos com placa de identificação do motor, bomba ou código gravado facilitam a homologação.
                 </p>
               </div>
             </div>
 
-            {/* Justificativa */}
             <div className="pt-2">
               <label className="block text-[11px] font-semibold text-slate-700 mb-1">
                 Aplicação na Planta / Justificativa da Solicitação
@@ -1067,7 +1398,6 @@ export const PDMBuilderModal: React.FC<PDMBuilderModalProps> = ({
               />
             </div>
           </div>
-
         </form>
 
         {/* MODAL FOOTER */}
@@ -1088,12 +1418,11 @@ export const PDMBuilderModal: React.FC<PDMBuilderModalProps> = ({
             <CheckCircle2 className="w-4 h-4" />
             <span>
               {currentUserRole === 'MASTER_ADMIN'
-                ? 'Homologar & Publicar no Catálogo Global'
-                : 'Enviar para Fila de Governança Master'}
+                ? 'Criar PDM & Inserir Código TOTVS'
+                : 'Enviar para Fila de Governança'}
             </span>
           </button>
         </div>
-
       </div>
     </div>
   );

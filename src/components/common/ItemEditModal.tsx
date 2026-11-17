@@ -10,13 +10,13 @@ import {
   Camera, 
   Upload, 
   History, 
-  Sparkles, 
   ShieldCheck, 
   ArrowRight,
   Info
 } from 'lucide-react';
-import { PDMItem, UserRole, Tenant, ItemFieldChange, ItemChangeLog, ItemPendingChange } from '../../types/pdm';
+import { PDMItem, UserRole, Tenant, ItemFieldChange } from '../../types/pdm';
 import { PdmNivelItem, INITIAL_PDM_NIVEIS, getNiveis1List, getNiveis2List, getNiveis3List } from '../../data/pdmNiveisData';
+import { validateUpperNoAccents, sanitizeUpperNoAccents } from '../../utils/pdmDynamicAttributes';
 
 interface ItemEditModalProps {
   isOpen: boolean;
@@ -78,12 +78,15 @@ export const ItemEditModal: React.FC<ItemEditModalProps> = ({
   const [shortDescription, setShortDescription] = useState<string>(item.shortDescription || '');
   const [narrative, setNarrative] = useState<string>(item.narrative || '');
   const [ncm, setNcm] = useState<string>(item.ncm || '8482.10.10');
-  const [unspsc, setUnspsc] = useState<string>(item.unspsc || '31171504');
   const [totvsFamily, setTotvsFamily] = useState<string>(item.totvsFamily || '5040');
   const [unitOfMeasure, setUnitOfMeasure] = useState<string>(item.unitOfMeasure || 'UN');
   const [genericImage, setGenericImage] = useState<string | undefined>(item.genericImage);
   const [reason, setReason] = useState<string>('');
   const [directApproval, setDirectApproval] = useState<boolean>(isMaster);
+  const [formError, setFormError] = useState<string | null>(null);
+
+  const shortValidation = useMemo(() => validateUpperNoAccents(shortDescription), [shortDescription]);
+  const narrativeValidation = useMemo(() => validateUpperNoAccents(narrative), [narrative]);
 
   // When Nível 1 changes, cascade Nível 2 and Nível 3
   const handleNivel1Change = (newN1: string) => {
@@ -160,15 +163,6 @@ export const ItemEditModal: React.FC<ItemEditModalProps> = ({
       });
     }
 
-    if (item.unspsc !== unspsc.trim()) {
-      changes.push({
-        field: 'unspsc',
-        fieldLabel: 'Código UNSPSC',
-        oldValue: item.unspsc || '(Vazio)',
-        newValue: unspsc.trim(),
-      });
-    }
-
     if (item.totvsFamily !== totvsFamily.trim()) {
       changes.push({
         field: 'totvsFamily',
@@ -197,7 +191,7 @@ export const ItemEditModal: React.FC<ItemEditModalProps> = ({
     }
 
     return changes;
-  }, [item, nivel1, nivel2, nivel3, shortDescription, narrative, ncm, unspsc, totvsFamily, unitOfMeasure, genericImage]);
+  }, [item, nivel1, nivel2, nivel3, shortDescription, narrative, ncm, totvsFamily, unitOfMeasure, genericImage]);
 
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -212,26 +206,40 @@ export const ItemEditModal: React.FC<ItemEditModalProps> = ({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    setFormError(null);
+
+    if (!shortValidation.isValid) {
+      setFormError('A Descrição do Item (60c) deve estar totalmente em MAIÚSCULO e sem acentos.');
+      return;
+    }
+
+    if (narrative.trim() && !narrativeValidation.isValid) {
+      setFormError('A Narrativa do Item (200c) deve estar totalmente em MAIÚSCULO e sem acentos.');
+      return;
+    }
 
     if (detectedChanges.length === 0) {
-      alert('Nenhuma alteração foi realizada em relação ao cadastro atual.');
+      setFormError('Nenhuma alteração foi realizada em relação ao cadastro atual.');
       return;
     }
 
     if (!reason.trim()) {
-      alert('Por favor, informe a justificativa técnica para o registro de auditoria e governança.');
+      setFormError('Por favor, informe a justificativa técnica para o registro de auditoria e governança.');
       return;
     }
+
+    const cleanShort = sanitizeUpperNoAccents(shortDescription.trim(), 60);
+    const cleanNarrative = sanitizeUpperNoAccents(narrative.trim(), 200);
 
     const proposedValues: Partial<PDMItem> = {
       nivel1,
       nivel2,
       nivel3,
-      shortDescription: shortDescription.trim().toUpperCase().slice(0, 60),
-      narrative: narrative.trim().slice(0, 200),
-      longDescription: narrative.trim() ? `${shortDescription.trim().toUpperCase()} - ${narrative.trim()}` : shortDescription.trim().toUpperCase(),
+      shortDescription: cleanShort,
+      narrative: cleanNarrative,
+      longDescription: cleanNarrative || cleanShort,
       ncm: ncm.trim(),
-      unspsc: unspsc.trim(),
+      unspsc: '',
       totvsFamily: totvsFamily.trim() || '5040',
       unitOfMeasure: unitOfMeasure.trim() || 'UN',
       genericImage,
@@ -283,6 +291,12 @@ export const ItemEditModal: React.FC<ItemEditModalProps> = ({
 
         {/* BODY */}
         <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-6 space-y-5 text-xs">
+          {formError && (
+            <div className="p-3 rounded-xl bg-rose-50 border border-rose-300 text-rose-900 flex items-center gap-2 text-xs font-semibold">
+              <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
+              <span>{formError}</span>
+            </div>
+          )}
           
           {/* CALLOUT: GOVERNANCE NOTICE */}
           <div className="p-3.5 rounded-xl bg-blue-50 border border-blue-200 flex items-start gap-3 text-blue-900">
@@ -392,10 +406,19 @@ export const ItemEditModal: React.FC<ItemEditModalProps> = ({
                 required
                 maxLength={60}
                 value={shortDescription}
-                onChange={(e) => setShortDescription(e.target.value.toUpperCase())}
+                onChange={(e) => setShortDescription(e.target.value)}
                 placeholder="Ex: ROL ESF RIG 6205 25MM 52MM 15MM DDU C3"
-                className="w-full p-2.5 bg-white border border-slate-200 rounded-xl font-mono text-xs text-slate-900 focus:outline-none focus:border-emerald-600 focus:ring-2 focus:ring-emerald-100 shadow-2xs font-bold"
+                className={`w-full p-2.5 bg-white border rounded-xl font-mono text-xs focus:outline-none focus:ring-2 shadow-2xs font-bold ${
+                  shortValidation.isValid
+                    ? 'border-slate-200 text-slate-900 focus:border-emerald-600 focus:ring-emerald-100'
+                    : 'border-rose-400 text-rose-900 focus:border-rose-600 focus:ring-rose-100'
+                }`}
               />
+              {!shortValidation.isValid && (
+                <p className="text-[11px] font-semibold text-rose-700 mt-1">
+                  Deve estar em MAIÚSCULO e sem acentuação.
+                </p>
+              )}
             </div>
 
             {/* Narrativa do Item 200c */}
@@ -415,14 +438,23 @@ export const ItemEditModal: React.FC<ItemEditModalProps> = ({
                 maxLength={200}
                 value={narrative}
                 onChange={(e) => setNarrative(e.target.value)}
-                placeholder="Ex: Part Number OEM 6205-2RSH/C3 SKF, diâmetro 25mm, aplicação esteira linha de secagem..."
-                className="w-full p-2.5 bg-white border border-slate-200 rounded-xl font-mono text-xs text-slate-900 focus:outline-none focus:border-emerald-600 focus:ring-2 focus:ring-emerald-100 shadow-2xs leading-relaxed"
+                placeholder="Ex: PART NUMBER OEM 6205-2RSH/C3 SKF, DIAMETRO 25MM, APLICACAO ESTEIRA..."
+                className={`w-full p-2.5 bg-white border rounded-xl font-mono text-xs focus:outline-none focus:ring-2 shadow-2xs leading-relaxed ${
+                  narrativeValidation.isValid
+                    ? 'border-slate-200 text-slate-900 focus:border-emerald-600 focus:ring-emerald-100'
+                    : 'border-rose-400 text-rose-900 focus:border-rose-600 focus:ring-rose-100'
+                }`}
               />
+              {!narrativeValidation.isValid && (
+                <p className="text-[11px] font-semibold text-rose-700 mt-1">
+                  Deve estar em MAIÚSCULO e sem acentuação.
+                </p>
+              )}
             </div>
           </div>
 
           {/* 3. FISCAL & TOTVS ATTRIBUTES */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 p-4 rounded-xl bg-slate-50 border border-slate-200">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 p-4 rounded-xl bg-slate-50 border border-slate-200">
             <div>
               <label className="block text-[11px] font-semibold text-slate-700 mb-1">
                 Classificação Fiscal (NCM)
@@ -431,18 +463,6 @@ export const ItemEditModal: React.FC<ItemEditModalProps> = ({
                 type="text"
                 value={ncm}
                 onChange={(e) => setNcm(e.target.value)}
-                className="w-full p-2 bg-white border border-slate-200 rounded-xl font-mono text-xs text-slate-900 focus:outline-none focus:border-emerald-600"
-              />
-            </div>
-
-            <div>
-              <label className="block text-[11px] font-semibold text-slate-700 mb-1">
-                Código UNSPSC
-              </label>
-              <input
-                type="text"
-                value={unspsc}
-                onChange={(e) => setUnspsc(e.target.value)}
                 className="w-full p-2 bg-white border border-slate-200 rounded-xl font-mono text-xs text-slate-900 focus:outline-none focus:border-emerald-600"
               />
             </div>
@@ -472,6 +492,7 @@ export const ItemEditModal: React.FC<ItemEditModalProps> = ({
                 <option value="PC">PC - Peça</option>
                 <option value="KG">KG - Quilograma</option>
                 <option value="MT">MT - Metro</option>
+                <option value="FT">FT - Pés</option>
                 <option value="LT">LT - Litro</option>
                 <option value="CJ">CJ - Conjunto</option>
                 <option value="JG">JG - Jogo</option>

@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { 
   Search, 
   Filter, 
@@ -16,7 +16,6 @@ import {
   Sliders, 
   X, 
   RotateCcw,
-  Sparkles,
   ListTree,
   FolderTree,
   ShieldCheck,
@@ -26,7 +25,8 @@ import {
 } from 'lucide-react';
 import { PDMItem, UserRole, Tenant } from '../../types/pdm';
 import { PdmNivelItem, getNiveis1List, getNiveis2List, getNiveis3List } from '../../data/pdmNiveisData';
-import { matchTotvsSearch, SearchLogicMode } from '../../utils/totvsSearch';
+import { matchTotvsTokens } from '../../utils/totvsSearch';
+import { DogPawIcon } from '../common/DogPawIcon';
 
 interface PdmClassificationQueryViewProps {
   items: PDMItem[];
@@ -47,9 +47,10 @@ export const PdmClassificationQueryView: React.FC<PdmClassificationQueryViewProp
   onOpenEdit,
   onOpenPdmBuilder,
 }) => {
-  // Search & Filter State
-  const [searchTerm, setSearchTerm] = useState('');
-  const [searchLogicMode, setSearchLogicMode] = useState<SearchLogicMode>('AND');
+  // Search & Filter State (Validated Chips identical to Catálogo Mestre)
+  const [validatedTerms, setValidatedTerms] = useState<string[]>([]);
+  const [searchDraft, setSearchDraft] = useState('');
+  const searchInputRef = useRef<HTMLInputElement>(null);
   const [selectedN1, setSelectedN1] = useState<string>('ALL');
   const [selectedN2, setSelectedN2] = useState<string>('ALL');
   const [selectedN3, setSelectedN3] = useState<string>('ALL');
@@ -152,14 +153,81 @@ export const PdmClassificationQueryView: React.FC<PdmClassificationQueryViewProp
     return approvedItems.filter((i) => i.classificationOrigin !== 'TOTVS_SEM_CLASSIFICACAO' && i.isClassified !== false).length;
   }, [approvedItems]);
 
+  // Combine validated chips + active draft words for strict AND filtering
+  const activeSearchTokens = useMemo(() => {
+    const draftTokens = searchDraft
+      .trim()
+      .split(/\s+/)
+      .map((t) => t.trim())
+      .filter(Boolean);
+    const seen = new Set<string>();
+    const combined: string[] = [];
+    for (const term of [...validatedTerms, ...draftTokens]) {
+      const lower = term.toLowerCase();
+      if (!seen.has(lower)) {
+        seen.add(lower);
+        combined.push(term);
+      }
+    }
+    return combined;
+  }, [validatedTerms, searchDraft]);
+
+  const commitDraftTerm = (rawText?: string) => {
+    const textToCommit = (rawText !== undefined ? rawText : searchDraft).trim();
+    if (!textToCommit) return;
+
+    const newTokens = textToCommit
+      .split(/[\s,;]+/)
+      .map((t) => t.trim())
+      .filter(Boolean);
+
+    if (newTokens.length === 0) return;
+
+    setValidatedTerms((prev) => {
+      const existingLower = new Set(prev.map((t) => t.toLowerCase()));
+      const additions = newTokens.filter((t) => !existingLower.has(t.toLowerCase()));
+      return [...prev, ...additions];
+    });
+    setSearchDraft('');
+    searchInputRef.current?.focus();
+  };
+
+  const removeValidatedTerm = (indexToRemove: number) => {
+    setValidatedTerms((prev) => prev.filter((_, idx) => idx !== indexToRemove));
+    searchInputRef.current?.focus();
+  };
+
+  const handleClearSearch = () => {
+    setValidatedTerms([]);
+    setSearchDraft('');
+    searchInputRef.current?.focus();
+  };
+
+  const handleSearchKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter' || e.key === ',' || e.key === ';') {
+      if (searchDraft.trim()) {
+        e.preventDefault();
+        commitDraftTerm();
+      }
+    } else if (e.key === ' ') {
+      if (searchDraft.trim()) {
+        e.preventDefault();
+        commitDraftTerm();
+      }
+    } else if (e.key === 'Backspace' && !searchDraft && validatedTerms.length > 0) {
+      setValidatedTerms((prev) => prev.slice(0, -1));
+    }
+  };
+
   // Reset page when any filter changes
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchTerm, searchLogicMode, selectedN1, selectedN2, selectedN3, selectedSituationFilter, selectedOriginFilter, pageSize]);
+  }, [activeSearchTokens, selectedN1, selectedN2, selectedN3, selectedSituationFilter, selectedOriginFilter, pageSize]);
 
   // Clear all filters
   const handleClearFilters = () => {
-    setSearchTerm('');
+    setValidatedTerms([]);
+    setSearchDraft('');
     setSelectedN1('ALL');
     setSelectedN2('ALL');
     setSelectedN3('ALL');
@@ -168,7 +236,7 @@ export const PdmClassificationQueryView: React.FC<PdmClassificationQueryViewProp
   };
 
   const hasActiveFilters = 
-    searchTerm.trim() !== '' || 
+    activeSearchTokens.length > 0 || 
     selectedN1 !== 'ALL' || 
     selectedN2 !== 'ALL' || 
     selectedN3 !== 'ALL' || 
@@ -207,13 +275,13 @@ export const PdmClassificationQueryView: React.FC<PdmClassificationQueryViewProp
         if (item.classificationOrigin !== 'TOTVS_SEM_CLASSIFICACAO' && item.isClassified !== false) return false;
       }
 
-      // 6. Text Search (E / OU logic across item code, description 60c, narrative 200c, family)
-      if (!searchTerm.trim()) return true;
+      // 6. Strict multi-term validated chip search
+      if (activeSearchTokens.length === 0) return true;
 
-      const result = matchTotvsSearch(item, searchTerm, searchLogicMode);
+      const result = matchTotvsTokens(item, activeSearchTokens);
       return result.isMatch;
     });
-  }, [approvedItems, selectedN1, selectedN2, selectedN3, selectedSituationFilter, selectedOriginFilter, searchTerm, searchLogicMode]);
+  }, [approvedItems, selectedN1, selectedN2, selectedN3, selectedSituationFilter, selectedOriginFilter, activeSearchTokens]);
 
   // Pagination calculation
   const totalPages = Math.max(1, Math.ceil(filteredItems.length / pageSize));
@@ -286,7 +354,7 @@ export const PdmClassificationQueryView: React.FC<PdmClassificationQueryViewProp
                 </span>
               </div>
               <p className="text-xs text-amber-900 mt-1">
-                Foram identificados itens cadastrados diretamente no Protheus sem aprovação prévia e sem os 3 níveis MRO. Use o filtro abaixo para localizá-los e clique em <strong>Classificar</strong> para enviar à Fila de Governança.
+                Foram identificados itens cadastrados diretamente no TOTVS sem aprovação prévia e sem os 3 níveis MRO. Use o filtro abaixo para localizá-los e clique em <strong>Classificar</strong> para enviar à Fila de Governança.
               </p>
             </div>
           </div>
@@ -356,7 +424,7 @@ export const PdmClassificationQueryView: React.FC<PdmClassificationQueryViewProp
                 onClick={onOpenPdmBuilder}
                 className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-xs shadow-xs transition-colors"
               >
-                <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+                <DogPawIcon className="w-3.5 h-3.5 text-amber-300" />
                 <span>Novo PDM</span>
               </button>
             )}
@@ -407,44 +475,78 @@ export const PdmClassificationQueryView: React.FC<PdmClassificationQueryViewProp
       {/* 2. CASCADING CLASSIFICATION FILTER STRIP */}
       <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-xs space-y-3">
         
-        {/* ROW 1: TEXT SEARCH & E/OU TOGGLE & SELECTORS */}
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-3">
-          <div className="lg:col-span-6 flex items-stretch gap-2">
-            <div className="relative flex-1">
-              <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
-              <input
-                type="text"
-                placeholder="Pesquisar por Código TOTVS (ex: 5040-0001), Descrição 60c ou Narrativa 200c..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 placeholder-slate-400 focus:outline-none focus:border-emerald-600 focus:bg-white focus:ring-2 focus:ring-emerald-100 font-medium"
-              />
-            </div>
+        {/* ROW 1: VALIDATED CHIP SEARCH & SELECTORS */}
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-3 items-start">
+          <div className="lg:col-span-6">
+            <div
+              onClick={() => searchInputRef.current?.focus()}
+              className="min-h-[42px] w-full px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 focus-within:border-emerald-600 focus-within:bg-white focus-within:ring-2 focus-within:ring-emerald-100 shadow-2xs flex flex-wrap items-center gap-1.5 cursor-text transition-all"
+            >
+              <Search className="w-4 h-4 text-slate-400 shrink-0 mr-0.5" />
 
-            {/* E / OU Mode Toggle */}
-            <div className="flex items-center rounded-xl bg-slate-100 border border-slate-200 p-1 shadow-2xs shrink-0">
-              <button
-                onClick={() => setSearchLogicMode('AND')}
-                className={`px-3 py-1 rounded-lg text-xs font-mono font-bold transition-all ${
-                  searchLogicMode === 'AND'
-                    ? 'bg-emerald-700 text-white shadow-xs'
-                    : 'text-slate-500 hover:text-slate-800'
-                }`}
-                title="Lógica E: Todos os termos pesquisados devem estar no item"
-              >
-                Lógica E
-              </button>
-              <button
-                onClick={() => setSearchLogicMode('OR')}
-                className={`px-3 py-1 rounded-lg text-xs font-mono font-bold transition-all ${
-                  searchLogicMode === 'OR'
-                    ? 'bg-emerald-700 text-white shadow-xs'
-                    : 'text-slate-500 hover:text-slate-800'
-                }`}
-                title="Lógica OU: Qualquer um dos termos pesquisados é localizado"
-              >
-                Lógica OU
-              </button>
+              {validatedTerms.map((term, index) => (
+                <span
+                  key={`${term}-${index}`}
+                  className="inline-flex items-center gap-1 pl-2 pr-1 py-0.5 rounded-lg bg-emerald-50 border border-emerald-300 text-emerald-900 font-mono text-[11px] font-bold shadow-2xs"
+                >
+                  <Check className="w-3 h-3 text-emerald-600 stroke-[2.75] shrink-0" />
+                  <span>{term}</span>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      removeValidatedTerm(index);
+                    }}
+                    className="p-0.5 rounded hover:bg-emerald-200/70 text-emerald-700 hover:text-emerald-950 transition-colors"
+                    title={`Remover termo "${term}"`}
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                </span>
+              ))}
+
+              <input
+                ref={searchInputRef}
+                type="text"
+                placeholder={
+                  validatedTerms.length === 0
+                    ? 'Digite um termo e valide com ✓ ou Enter (ex: ROLAMENTO)...'
+                    : 'Adicionar próximo termo e validar com ✓...'
+                }
+                value={searchDraft}
+                onChange={(e) => setSearchDraft(e.target.value)}
+                onKeyDown={handleSearchKeyDown}
+                className="flex-1 min-w-[160px] py-1 bg-transparent text-xs text-slate-900 placeholder-slate-400 focus:outline-none font-medium"
+              />
+
+              {searchDraft.trim().length > 0 && (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    commitDraftTerm();
+                  }}
+                  className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white text-[11px] font-bold transition-colors shrink-0 shadow-2xs"
+                  title="Validar e fixar termo na pesquisa"
+                >
+                  <Check className="w-3.5 h-3.5 stroke-[2.75]" />
+                  <span>Validar</span>
+                </button>
+              )}
+
+              {(validatedTerms.length > 0 || searchDraft.length > 0) && (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleClearSearch();
+                  }}
+                  className="p-1 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors shrink-0"
+                  title="Limpar pesquisa"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              )}
             </div>
           </div>
 
@@ -619,17 +721,17 @@ export const PdmClassificationQueryView: React.FC<PdmClassificationQueryViewProp
 
       {/* 3. DENSE TECHNICAL TABLE (SEM COLUNAS DE SALDO) */}
       <div className="rounded-2xl border border-slate-200 bg-white overflow-hidden shadow-xs">
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs border-collapse">
-            <thead>
-              <tr className="border-b border-slate-200 bg-slate-50/80 text-slate-500 font-mono text-[11px] uppercase tracking-wider">
-                <th className="py-3 px-4">Item (Cód. TOTVS)</th>
+        <div className="overflow-auto max-h-[65vh]">
+          <table className="w-full text-center text-xs border-collapse">
+            <thead className="sticky top-0 z-20 bg-slate-50 shadow-[0_1px_0_0_#e2e8f0]">
+              <tr className="border-b border-slate-200 bg-slate-50 text-slate-500 font-mono text-[11px] uppercase tracking-wider">
+                <th className="py-3 px-4 text-center">ITEM</th>
                 <th className="py-3 px-3 text-center">Origem PDM</th>
-                <th className="py-3 px-3">Nível 1 · Grupo Macro</th>
-                <th className="py-3 px-3">Nível 2 · Subgrupo / Família</th>
-                <th className="py-3 px-3">Nível 3 · Subgrupo Específico</th>
-                <th className="py-3 px-4">Descrição do Item (60c - Col AE)</th>
-                <th className="py-3 px-4">Narrativa Técnica (200c - Col AF)</th>
+                <th className="py-3 px-3 text-center">Nível 1 · Grupo Macro</th>
+                <th className="py-3 px-3 text-center">Nível 2 · Subgrupo / Família</th>
+                <th className="py-3 px-3 text-center">Nível 3 · Subgrupo Específico</th>
+                <th className="py-3 px-4 text-center">DESCRIÇÃO DO ITEM</th>
+                <th className="py-3 px-4 text-center">NARRATIVA TÉCNICA</th>
                 <th className="py-3 px-3 text-center">Situação</th>
                 <th className="py-3 px-3 text-center">Un</th>
                 <th className="py-3 px-4 text-center">Ações & Governança</th>
@@ -655,8 +757,8 @@ export const PdmClassificationQueryView: React.FC<PdmClassificationQueryViewProp
                       }`}
                     >
                       {/* C - ITEM (CÓDIGO TOTVS) */}
-                      <td className="py-3 px-4 whitespace-nowrap">
-                        <div className="font-mono font-bold text-emerald-800 text-xs flex items-center gap-1.5">
+                      <td className="py-3 px-4 whitespace-nowrap text-center">
+                        <div className="font-mono font-bold text-emerald-800 text-xs flex items-center justify-center gap-1.5">
                           <span>{item.totvsCode || item.pdmCode}</span>
                           {item.pendingChange && (
                             <span 
@@ -677,7 +779,7 @@ export const PdmClassificationQueryView: React.FC<PdmClassificationQueryViewProp
                         {isUnclassified ? (
                           <span 
                             className="inline-flex items-center gap-1 font-mono text-[10px] font-bold px-2 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-300"
-                            title="Item cadastrado diretamente no TOTVS Protheus sem prévia classificação ou saneamento PDM"
+                            title="Item cadastrado diretamente no TOTVS sem prévia classificação ou saneamento PDM"
                           >
                             <AlertTriangle className="w-3 h-3 text-amber-600 shrink-0" />
                             <span>Direto TOTVS</span>
@@ -694,7 +796,7 @@ export const PdmClassificationQueryView: React.FC<PdmClassificationQueryViewProp
                       </td>
 
                       {/* NÍVEL 1: GRUPO MACRO */}
-                      <td className="py-3 px-3 whitespace-nowrap">
+                      <td className="py-3 px-3 whitespace-nowrap text-center">
                         <span className={`inline-block text-[11px] font-mono font-semibold px-2 py-0.5 rounded border ${
                           isUnclassified 
                             ? 'text-amber-900 bg-amber-50 border-amber-200' 
@@ -705,22 +807,22 @@ export const PdmClassificationQueryView: React.FC<PdmClassificationQueryViewProp
                       </td>
 
                       {/* NÍVEL 2: SUBGRUPO / FAMÍLIA */}
-                      <td className="py-3 px-3 whitespace-nowrap">
+                      <td className="py-3 px-3 whitespace-nowrap text-center">
                         <span className="inline-block text-[11px] font-mono text-slate-800 bg-slate-100 px-2 py-0.5 rounded border border-slate-200">
                           {item.nivel2 || item.totvsFamily || 'Geral'}
                         </span>
                       </td>
 
                       {/* NÍVEL 3: SUBGRUPO ESPECÍFICO */}
-                      <td className="py-3 px-3 whitespace-nowrap">
+                      <td className="py-3 px-3 whitespace-nowrap text-center">
                         <span className="inline-block text-[11px] font-mono font-semibold text-slate-700 bg-white px-2 py-0.5 rounded border border-slate-200 shadow-2xs">
                           {item.nivel3 || 'Item Homologado'}
                         </span>
                       </td>
 
                       {/* AE - DESCRIÇÃO DO ITEM (60 CARACTERES) */}
-                      <td className="py-3 px-4 max-w-xs">
-                        <div className="flex items-center gap-1.5">
+                      <td className="py-3 px-4 max-w-xs text-center">
+                        <div className="flex items-center justify-center gap-1.5">
                           <span className="font-mono text-xs text-slate-900 font-semibold tracking-wide">
                             {item.shortDescription}
                           </span>
@@ -742,9 +844,9 @@ export const PdmClassificationQueryView: React.FC<PdmClassificationQueryViewProp
                       </td>
 
                       {/* AF - NARRATIVA DO ITEM (200 CARACTERES) */}
-                      <td className="py-3 px-4 max-w-sm">
+                      <td className="py-3 px-4 max-w-sm text-center">
                         {item.narrative ? (
-                          <div className="text-[11px] text-slate-700 font-mono line-clamp-2" title={item.narrative}>
+                          <div className="text-[11px] text-slate-700 font-mono line-clamp-2 mx-auto" title={item.narrative}>
                             {item.narrative}
                           </div>
                         ) : (

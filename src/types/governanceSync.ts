@@ -9,6 +9,7 @@ import {
   ItemChangeLog,
   ItemApprovalWorkflow,
   QuotationData,
+  TotvsFamilyCode,
 } from './pdm';
 import { UserAccount } from './auth';
 import { PdmNivelItem } from '../data/pdmNiveisData';
@@ -47,6 +48,7 @@ export interface SiteGovernanceDelta {
   updatedBy?: string;
   users: UserAccount[];
   global2FARequired: boolean;
+  enabledFamilies?: TotvsFamilyCode[];
   pdmLevels: PdmNivelItem[];
   customPdmItems: PDMItem[];
   itemOverrides: Record<string, ItemGovernanceOverride>;

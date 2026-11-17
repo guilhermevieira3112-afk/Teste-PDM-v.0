@@ -2,6 +2,7 @@ import { UserRole } from './pdm';
 
 export type UserProfileRole = 'MASTER_ADMIN' | 'ALMOXARIFADO' | 'MANUTENCAO_PRODUCAO';
 export type UserStatus = 'ACTIVE' | 'BLOCKED' | 'PENDING_APPROVAL';
+export type GovernanceQueueAccess = 'NONE' | 'VIEW' | 'EDIT';
 
 export interface UserAccount {
   id: string;
@@ -14,6 +15,7 @@ export interface UserAccount {
   tenantId: string; // 'dourado-sp' | 'porto-amazonas-pr' | 'corporativo'
   tenantName: string;
   approvalTier?: 1 | 2 | 3 | 'ALL'; // Nível de Aprovação por Alçada: 1 (até 1k), 2 (até 10k), 3 (> 10k), ALL (Master)
+  governanceQueueAccess?: GovernanceQueueAccess; // Permissão na Fila de Governança: NONE, VIEW, EDIT
   status: UserStatus;
   avatarUrl?: string;
   twoFactorEnabled?: boolean;

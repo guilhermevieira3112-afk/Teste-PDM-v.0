@@ -17,13 +17,48 @@ import {
   UserPlus, 
   HelpCircle,
   Clock,
-  Sparkles,
   ShieldAlert
 } from 'lucide-react';
 import { UserAccount, UserProfileRole } from '../../types/auth';
 import { TENANTS } from '../../data/taxonomy';
+import { INITIAL_USERS } from '../../data/users';
 import { generateTOTPCode, verifyTOTPCode, getSecondsRemaining, getOtpAuthUri } from '../../utils/totp';
 import { generateStandardUsername, validatePasswordRequirements, PROFILE_LABELS } from '../../utils/userUtils';
+
+// TEMP_FIXED_PROFILES: Perfis fixos temporários para testes sem etapa de 2FA (remover ao final do projeto)
+const TEMP_FIXED_PROFILE_SPECS: {
+  username: string;
+  profileLabel: string;
+  dotClass: string;
+  badgeClass: string;
+}[] = [
+  {
+    username: 'felipe.rocha',
+    profileLabel: 'Manutenção / Produção',
+    dotClass: 'bg-emerald-600',
+    badgeClass: 'bg-emerald-100 text-emerald-800',
+  },
+  {
+    username: 'carlos.santos',
+    profileLabel: 'Almoxarifado',
+    dotClass: 'bg-blue-600',
+    badgeClass: 'bg-blue-100 text-blue-800',
+  },
+  {
+    username: 'carlos.silva',
+    profileLabel: 'Master',
+    dotClass: 'bg-amber-500',
+    badgeClass: 'bg-amber-100 text-amber-900',
+  },
+  {
+    username: 'pdmindustrial.premierpet',
+    profileLabel: 'Admin',
+    dotClass: 'bg-rose-600',
+    badgeClass: 'bg-rose-100 text-rose-800',
+  },
+];
+
+const TEMP_FIXED_USERNAMES = new Set(TEMP_FIXED_PROFILE_SPECS.map((p) => p.username));
 
 interface LoginScreenProps {
   users: UserAccount[];
@@ -153,8 +188,10 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
       return;
     }
 
-    // pdmindustrial.premierpet nunca necessita de 2FA; demais usuários seguem o toggle global2FARequired
-    const isExemptMaster = matchedUser.username.toLowerCase() === 'pdmindustrial.premierpet';
+    // pdmindustrial.premierpet e perfis fixos de teste não passam pela etapa de 2FA no início
+    const isExemptMaster =
+      matchedUser.username.toLowerCase() === 'pdmindustrial.premierpet' ||
+      TEMP_FIXED_USERNAMES.has(matchedUser.username.toLowerCase());
     const requires2FA = !isExemptMaster && global2FARequired;
 
     if (requires2FA) {
@@ -169,8 +206,8 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
     }
   };
 
-  // Quick 1-click login for test and validation
-  const handleQuickLogin = (user: UserAccount) => {
+  // Quick 1-click login for fixed test profiles (sem etapa de verificação 2FA)
+  const handleQuickLogin = (user: UserAccount, skipVerification = true) => {
     setUsernameInput(user.username);
     setPasswordInput(user.password || '123');
     setErrorMessage(null);
@@ -191,7 +228,10 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
       return;
     }
 
-    const isExemptMaster = user.username.toLowerCase() === 'pdmindustrial.premierpet';
+    const isExemptMaster =
+      skipVerification ||
+      user.username.toLowerCase() === 'pdmindustrial.premierpet' ||
+      TEMP_FIXED_USERNAMES.has(user.username.toLowerCase());
     const requires2FA = !isExemptMaster && global2FARequired;
 
     if (requires2FA) {
@@ -205,6 +245,19 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
       onLoginSuccess(user);
     }
   };
+
+  const fixedQuickProfiles = useMemo(() => {
+    return TEMP_FIXED_PROFILE_SPECS.map((spec) => {
+      const fromLiveUsers = users.find(
+        (u) => u.username.toLowerCase() === spec.username && u.status === 'ACTIVE'
+      );
+      const fromInitial = INITIAL_USERS.find(
+        (u) => u.username.toLowerCase() === spec.username
+      );
+      const resolvedUser = fromLiveUsers || fromInitial;
+      return resolvedUser ? { spec, user: resolvedUser } : null;
+    }).filter((entry): entry is { spec: (typeof TEMP_FIXED_PROFILE_SPECS)[number]; user: UserAccount } => Boolean(entry));
+  }, [users]);
 
   // Handle 2FA verification submit
   const handleVerify2FA = async (e: React.FormEvent) => {
@@ -436,51 +489,48 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
 
           </form>
 
-          {/* 4. QUICK ACCESS PROFILES BAR (1-CLICK DEMO) */}
+          {/* 4. QUICK ACCESS PROFILES BAR (TEMP FIXED PROFILES WITHOUT 2FA) */}
           <div className="pt-4 border-t border-slate-100 space-y-2">
             <div className="flex items-center justify-between text-[11px] text-slate-500">
               <span className="font-mono uppercase font-bold tracking-wider text-slate-400">
-                Acessos Rápidos de Demonstração
+                Perfis Fixos de Teste (Temporário)
               </span>
-              <span className="text-[10px] text-emerald-700 font-semibold">1 Clique</span>
+              <span className="text-[10px] text-emerald-700 font-semibold">1 Clique · Sem Verificação</span>
             </div>
 
             <div className="grid grid-cols-1 gap-1.5">
-              {users.filter((u) => u.status === 'ACTIVE').slice(0, 3).map((u) => {
-                const requires2FA = u.username.toLowerCase() !== 'pdmindustrial.premierpet' && global2FARequired;
-                return (
-                  <button
-                    key={u.id}
-                    onClick={() => handleQuickLogin(u)}
-                    className="w-full flex items-center justify-between p-2 rounded-xl bg-slate-50 hover:bg-emerald-50 border border-slate-200/80 hover:border-emerald-300 text-left transition-all group"
-                  >
-                    <div className="flex items-center gap-2 min-w-0">
-                      <div className={`w-2 h-2 rounded-full ${
-                        u.role === 'MASTER_ADMIN' ? 'bg-amber-500' : 'bg-emerald-600'
-                      }`} />
-                      <div className="min-w-0">
-                        <div className="text-xs font-bold text-slate-800 group-hover:text-emerald-900 truncate">
+              {fixedQuickProfiles.map(({ spec, user: u }) => (
+                <button
+                  key={u.id}
+                  type="button"
+                  onClick={() => handleQuickLogin(u, true)}
+                  className="w-full flex items-center justify-between p-2 rounded-xl bg-slate-50 hover:bg-emerald-50 border border-slate-200/80 hover:border-emerald-300 text-left transition-all group"
+                >
+                  <div className="flex items-center gap-2 min-w-0">
+                    <div className={`w-2 h-2 rounded-full shrink-0 ${spec.dotClass}`} />
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className={`text-[10px] font-mono font-bold px-1.5 py-0.5 rounded ${spec.badgeClass}`}>
+                          {spec.profileLabel}
+                        </span>
+                        <span className="text-xs font-bold text-slate-800 group-hover:text-emerald-900 truncate">
                           {u.name}
-                        </div>
-                        <div className="text-[10px] text-slate-500 truncate">
-                          {u.role === 'MASTER_ADMIN' ? 'Master Admin · Global' : u.tenantName}
-                        </div>
+                        </span>
+                      </div>
+                      <div className="text-[10px] text-slate-500 truncate mt-0.5">
+                        {u.role === 'MASTER_ADMIN' ? 'Governança Corporativa Global' : u.tenantName} ·{' '}
+                        <span className="font-mono text-slate-400">{u.username}</span>
                       </div>
                     </div>
+                  </div>
 
-                    <div className="flex items-center gap-1.5 shrink-0">
-                      {requires2FA && (
-                        <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-blue-100 text-blue-800 font-bold flex items-center gap-0.5">
-                          <Smartphone className="w-2.5 h-2.5" /> 2FA
-                        </span>
-                      )}
-                      <span className="text-[10px] font-mono font-bold text-slate-400 group-hover:text-emerald-700">
-                        Entrar →
-                      </span>
-                    </div>
-                  </button>
-                );
-              })}
+                  <div className="flex items-center gap-1.5 shrink-0 pl-2">
+                    <span className="text-[10px] font-mono font-bold text-slate-400 group-hover:text-emerald-700">
+                      Entrar →
+                    </span>
+                  </div>
+                </button>
+              ))}
             </div>
           </div>
 

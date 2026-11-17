@@ -21,7 +21,7 @@ export const Header: React.FC<HeaderProps> = ({
       case 'governance':
         return 'Fila de Governança & Saneamento de Materiais';
       case 'totvs-import':
-        return 'Carga & Auditoria TOTVS (Base Protheus SB1)';
+        return 'Carga & Auditoria TOTVS (Base SB1)';
       case 'user-control':
         return 'Controle de Usuários & Gestão de Acessos';
       case 'pdm-fields':

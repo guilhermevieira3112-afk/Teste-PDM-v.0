@@ -3,7 +3,7 @@ import {
   Search, 
   Copy, 
   Check, 
-  Plus, 
+  Plus,
   FileSpreadsheet,
   ChevronLeft,
   ChevronRight,
@@ -14,27 +14,7 @@ import {
 } from 'lucide-react';
 import { PDMItem, UserRole, Tenant, TenantStockItem } from '../../types/pdm';
 import { matchTotvsTokens } from '../../utils/totvsSearch';
-
-const DogPawOutlineIcon: React.FC<{ className?: string }> = ({ className = 'w-4 h-4' }) => (
-  <svg
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth={1.75}
-    strokeLinecap="round"
-    strokeLinejoin="round"
-    className={className}
-    aria-hidden="true"
-  >
-    {/* Four outer toes */}
-    <ellipse cx="5.5" cy="9.5" rx="1.6" ry="2.2" transform="rotate(-18 5.5 9.5)" />
-    <ellipse cx="9.6" cy="6.2" rx="1.6" ry="2.3" transform="rotate(-6 9.6 6.2)" />
-    <ellipse cx="14.4" cy="6.2" rx="1.6" ry="2.3" transform="rotate(6 14.4 6.2)" />
-    <ellipse cx="18.5" cy="9.5" rx="1.6" ry="2.2" transform="rotate(18 18.5 9.5)" />
-    {/* Main metacarpal pad */}
-    <path d="M12 11.2c-2.6 0-5.1 2.2-5.1 4.8 0 1.8 1.3 2.9 2.9 2.9.9 0 1.5-.4 2.2-.4s1.3.4 2.2.4c1.6 0 2.9-1.1 2.9-2.9 0-2.6-2.5-4.8-5.1-4.8z" />
-  </svg>
-);
+import { DogPawIcon } from '../common/DogPawIcon';
 
 interface CatalogViewProps {
   items: PDMItem[];
@@ -320,14 +300,13 @@ export const CatalogView: React.FC<CatalogViewProps> = ({
 
           <div className="hidden sm:block h-8 w-px bg-slate-200" />
 
-          {/* SEPARATED HIGHLIGHTED ACTION BUTTON: NOVO CADASTRO PDM WITH DOG PAW OUTLINE */}
+          {/* SEPARATED HIGHLIGHTED ACTION BUTTON: NOVO CADASTRO PDM WITH DOG PAW ICON */}
           <button
             onClick={onOpenPdmBuilder}
             className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-extrabold transition-all shadow-md hover:shadow-lg border border-amber-400 ring-2 ring-amber-500/20 active:scale-[0.98]"
           >
-            <Plus className="w-4 h-4 stroke-[2.75]" />
+            <DogPawIcon className="w-4 h-4 text-slate-900" />
             <span>Novo Cadastro PDM</span>
-            <DogPawOutlineIcon className="w-4 h-4 text-slate-900/75 ml-0.5" />
           </button>
         </div>
       </div>
@@ -502,17 +481,17 @@ export const CatalogView: React.FC<CatalogViewProps> = ({
 
       {/* DENSE TECHNICAL TABLE */}
       <div className="rounded-2xl border border-slate-200 bg-white overflow-hidden shadow-xs">
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs border-collapse">
-            <thead>
-              <tr className="border-b border-slate-200 bg-slate-50/80 text-slate-500 font-mono text-[11px] uppercase tracking-wider">
-                <th className="py-3 px-4">Item (Cód. TOTVS)</th>
-                <th className="py-3 px-4">Descrição do Item (60c - Col AE)</th>
-                <th className="py-3 px-4">Narrativa Técnica (200c - Col AF)</th>
+        <div className="overflow-auto max-h-[65vh]">
+          <table className="w-full text-center text-xs border-collapse">
+            <thead className="sticky top-0 z-20 bg-slate-50 shadow-[0_1px_0_0_#e2e8f0]">
+              <tr className="border-b border-slate-200 bg-slate-50 text-slate-500 font-mono text-[11px] uppercase tracking-wider">
+                <th className="py-3 px-4 text-center">ITEM</th>
+                <th className="py-3 px-4 text-center">DESCRIÇÃO DO ITEM</th>
+                <th className="py-3 px-4 text-center">NARRATIVA TÉCNICA</th>
                 <th className="py-3 px-4 text-center">Situação</th>
                 <th className="py-3 px-4 text-center">Un</th>
-                {showCol10 && <th className="py-3 px-4 text-right">Saldo Dourado (10)</th>}
-                {showCol14 && <th className="py-3 px-4 text-right">Saldo Paraná (14)</th>}
+                {showCol10 && <th className="py-3 px-4 text-center">Saldo Dourado (10)</th>}
+                {showCol14 && <th className="py-3 px-4 text-center">Saldo Paraná (14)</th>}
                 <th className="py-3 px-4 text-center">Ações</th>
               </tr>
             </thead>
@@ -538,8 +517,8 @@ export const CatalogView: React.FC<CatalogViewProps> = ({
                       }`}
                     >
                       {/* C - ITEM (CÓDIGO TOTVS) */}
-                      <td className="py-3 px-4 whitespace-nowrap">
-                        <div className="font-mono font-bold text-emerald-800 text-xs flex items-center gap-1.5">
+                      <td className="py-3 px-4 whitespace-nowrap text-center">
+                        <div className="font-mono font-bold text-emerald-800 text-xs flex items-center justify-center gap-1.5">
                           <span>{item.totvsCode || item.pdmCode}</span>
                         </div>
                         <div className="font-mono text-[10px] text-slate-400">
@@ -548,8 +527,8 @@ export const CatalogView: React.FC<CatalogViewProps> = ({
                       </td>
 
                       {/* AE - DESCRIÇÃO DO ITEM (60 CARACTERES) */}
-                      <td className="py-3 px-4 max-w-xs">
-                        <div className="flex items-center gap-1.5">
+                      <td className="py-3 px-4 max-w-xs text-center">
+                        <div className="flex items-center justify-center gap-1.5">
                           <span className="font-mono text-xs text-slate-900 font-semibold tracking-wide">
                             {item.shortDescription}
                           </span>
@@ -566,7 +545,7 @@ export const CatalogView: React.FC<CatalogViewProps> = ({
                           </button>
                         </div>
                         {item.nivel1 && (
-                          <div className="mt-1 flex items-center gap-1 flex-wrap">
+                          <div className="mt-1 flex items-center justify-center gap-1 flex-wrap">
                             <span className="text-[10px] font-mono font-semibold text-emerald-800 bg-emerald-50 px-1.5 py-0.2 rounded border border-emerald-200">
                               {item.nivel1}
                             </span>
@@ -580,9 +559,9 @@ export const CatalogView: React.FC<CatalogViewProps> = ({
                       </td>
 
                       {/* AF - NARRATIVA DO ITEM (200 CARACTERES) */}
-                      <td className="py-3 px-4 max-w-sm">
+                      <td className="py-3 px-4 max-w-sm text-center">
                         {item.narrative ? (
-                          <div className="text-[11px] text-slate-700 font-mono line-clamp-2" title={item.narrative}>
+                          <div className="text-[11px] text-slate-700 font-mono line-clamp-2 mx-auto" title={item.narrative}>
                             {item.narrative}
                           </div>
                         ) : (
@@ -608,7 +587,7 @@ export const CatalogView: React.FC<CatalogViewProps> = ({
 
                       {/* SALDO DOURADO (ESTAB 10) */}
                       {showCol10 && (
-                        <td className="py-3 px-4 whitespace-nowrap text-right font-mono">
+                        <td className="py-3 px-4 whitespace-nowrap text-center font-mono">
                           {e10 ? (
                             <span className={`font-semibold ${e10.saldoEstoque > 0 ? 'text-emerald-700' : 'text-slate-500'}`}>
                               {e10.saldoEstoque} {item.unitOfMeasure || 'UN'}
@@ -621,7 +600,7 @@ export const CatalogView: React.FC<CatalogViewProps> = ({
 
                       {/* SALDO PARANÁ (ESTAB 14) */}
                       {showCol14 && (
-                        <td className="py-3 px-4 whitespace-nowrap text-right font-mono">
+                        <td className="py-3 px-4 whitespace-nowrap text-center font-mono">
                           {e14 ? (
                             <span className={`font-semibold ${e14.saldoEstoque > 0 ? 'text-emerald-700' : 'text-slate-500'}`}>
                               {e14.saldoEstoque} {item.unitOfMeasure || 'UN'}

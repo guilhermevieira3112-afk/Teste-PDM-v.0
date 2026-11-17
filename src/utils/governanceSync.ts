@@ -1,4 +1,4 @@
-import { PDMItem, StockMovement } from '../types/pdm';
+import { PDMItem, StockMovement, TotvsFamilyCode } from '../types/pdm';
 import { UserAccount } from '../types/auth';
 import { PdmNivelItem } from '../data/pdmNiveisData';
 import {
@@ -59,6 +59,7 @@ function hasGovernanceChanges(baseItem: PDMItem, currentItem: PDMItem): boolean 
 export function extractSiteGovernanceDelta(params: {
   users: UserAccount[];
   global2FARequired: boolean;
+  enabledFamilies?: TotvsFamilyCode[];
   pdmLevels: PdmNivelItem[];
   pdmItems: PDMItem[];
   movements: StockMovement[];
@@ -70,6 +71,7 @@ export function extractSiteGovernanceDelta(params: {
   const {
     users,
     global2FARequired,
+    enabledFamilies,
     pdmLevels,
     pdmItems,
     movements,
@@ -129,6 +131,7 @@ export function extractSiteGovernanceDelta(params: {
     updatedBy,
     users,
     global2FARequired,
+    enabledFamilies,
     pdmLevels,
     customPdmItems,
     itemOverrides,
